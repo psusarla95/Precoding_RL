@@ -59,6 +59,8 @@ class CombRF_Env(gym.Env):
         self.freq = 30e9
         self.df = 60 * 1e3  # 75e3  # carrier spacing frequency
         self.nFFT = 1  # 2048  # no. of subspace carriers
+        self.T_sym = 1 / self.df
+        self.B = self.nFFT * self.df
         self.sc_xyz = np.array([]) #No reflection points for now
         self.ch_model ='fsp' #free-space path loss model
         self.N = self.N_rx #Number of receiver codebook directions
@@ -77,6 +79,7 @@ class CombRF_Env(gym.Env):
         self.rate = None #data rate, could be replaced with SNR as well
         self.cap = None #capacity of the channel for given conditions
         self.rbdir_count = 0
+        self.rwd_sum = 0
 
         self.rx_stepsize = 50 #in m
         self.rx_xcov = np.arange(-500, 550, self.rx_stepsize)#coverage along x axis
@@ -98,14 +101,15 @@ class CombRF_Env(gym.Env):
         h = self.obs[:-1]
         h = h.reshape(self.N_rx, self.N_tx, 1)
 
-        wRF = ula.steervec(self.N_rx, action, 0)
+        wRF = ula.steervec(self.N_rx, action[0], 0)
         rssi_val = np.abs(
             np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(h[:, :, 0])).dot(self.tx_beam) +
             (np.conj(wRF.T).dot(self.noise))[0]) ** 2
 
         #compute reward based on previous rssi value
         rwd = self.get_reward(rssi_val)
-        self.obs = np.concatenate((self.obs[:-1], rssi_val), axis=0)
+        self.rwd_sum = self.rwd_sum + rwd
+        self.obs = np.concatenate((self.obs[:-1], np.array([rssi_val])), axis=0)
         self.rbdir_count = self.rbdir_count + 1
         done = self._gameover()
 
@@ -113,25 +117,25 @@ class CombRF_Env(gym.Env):
 
     def reset(self):
         #select random TX loc from RX coverage area
-        self.tx_loc = np.array([random.choice(self.rx_xcov), random.choice(self.rx_ycov)])
+        self.tx_loc = np.array([[random.choice(self.rx_xcov), random.choice(self.rx_ycov), 0]])
 
         #select random tx beam from its codebook
         self.tx_beam = random.choice(self.tx_codebook)
 
         channel = Channel(self.freq, self.tx_loc, self.rx_loc, self.sc_xyz, 'model', self.ch_model, 'nrx', self.N_rx,
                                'ntx', self.N_tx, 'nFFT', self.nFFT, 'df', self.df)
+
         channel.generate_paths()
         self.h = channel.get_h() #channel coefficient
         self.cap = self.get_capacity() #Compute capacity of channel for given location
 
         r_bdir = self.action_space.sample()[0] #select a random receive direction
         wRF = ula.steervec(self.N_rx, r_bdir, 0)
-        self.rssi_val = np.abs(np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.h[:, :, 0])).dot(self.tx_beam) +
-                          (np.conj(wRF.T).dot(self.noise))[0]) ** 2
+        self.rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.h[:, :, 0])).dot(self.tx_beam) + (np.conj(wRF.T).dot(self.noise))[0]
 
         # state should be a factor of affective channel at transmitter + current RSSI value between TX and RX
         # A random state - comes from random fixed TX location, random TX beam from its codebook, random RX beam from its codebook
-        self.obs = np.concatenate((self.h.ravel(), self.rssi_val), axis=0)
+        self.obs = np.concatenate((self.h.ravel(), np.array([self.rssi_val])), axis=0)
 
         return self.obs
 
@@ -146,7 +150,7 @@ class CombRF_Env(gym.Env):
     def get_reward(self, rssi_val):
         #transmission energy
         Es = db2lin(self.P_tx) * (1e-3 / self.B)
-        SNR = Es * rssi_val / self.N0
+        SNR = Es * np.abs(rssi_val)**2 / self.N0
         self.rate = self.B / self.nFFT * np.log2(1 + SNR) * 1e-9  # in Gbit/s
 
         return self.rate/self.cap
