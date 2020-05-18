@@ -76,6 +76,7 @@ class CombRF_Env(gym.Env):
         self.state = None #initial observation
         self.rate = None #data rate, could be replaced with SNR as well
         self.cap = None #capacity of the channel for given conditions
+        self.rbdir_count = 0
 
         self.rx_stepsize = 50 #in m
         self.rx_xcov = np.arange(-500, 550, self.rx_stepsize)#coverage along x axis
@@ -105,8 +106,10 @@ class CombRF_Env(gym.Env):
         #compute reward based on previous rssi value
         rwd = self.get_reward(rssi_val)
         self.obs = np.concatenate((self.obs[:-1], rssi_val), axis=0)
+        self.rbdir_count = self.rbdir_count + 1
+        done = self._gameover()
 
-        return
+        return self.obs, rwd, done, {}
 
     def reset(self):
         #select random TX loc from RX coverage area
@@ -147,3 +150,9 @@ class CombRF_Env(gym.Env):
         self.rate = self.B / self.nFFT * np.log2(1 + SNR) * 1e-9  # in Gbit/s
 
         return self.rate/self.cap
+
+    def _gameover(self):
+        if (self.rbdir_count == self.N_rx):
+           return True
+        else:
+            return False
