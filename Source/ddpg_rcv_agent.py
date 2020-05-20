@@ -89,6 +89,52 @@ class Agent():
             experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples
             gamma (float): discount factor
         """
+        states, actions, rewards,next_states, dones =experiences
+
+        #update critic
+        #get predicted next-state actions andQ values from target models
+        actions_next =self.actor_target(next_states)
+        Q_targets_next = self.critic_target(next_states, actions_next)
+
+        #compute Q targets for current state
+        Q_targets =rewards + (gamma*Q_targets_next*(1-dones))
+
+        #compute critic loss
+        Q_expected =self.critic_local(states, actions)
+        critic_loss = F.mse_loss(Q_expected, Q_targets)
+
+        #minimize the loss
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        torch.nn.utils.clip_grad_norm(self.critic_local.parameters(), 1) #clip local gradients of critic
+        self.critic_optimizer.step()
+
+        #update actor
+        actions_pred = self.actor_local(states)
+        actor_loss =-self.critic_local(states, actions_pred).mean()
+
+        #Minimize the loss
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
+
+        #update target network
+        self.soft_update(self.critic_local, self.critic_target, TAU)
+        self.soft_update(self.actor_local, self.actor_target, TAU)
+
+    def soft_update(self, local_model, target_model, tau):
+        """Soft update model parameters.
+        θ_target = τ*θ_local + (1 - τ)*θ_target
+
+        Params
+        ======
+            local_model: PyTorch model (weights will be copied from)
+            target_model: PyTorch model (weights will be copied to)
+            tau (float): interpolation parameter
+        """
+        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
+            target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
+
 
 class OUNoise:
     """ Ornstein-Uhlenbeck process"""
