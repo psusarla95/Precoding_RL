@@ -136,7 +136,7 @@ class CombRF_Env(gym.Env):
         # state should be a factor of affective channel at transmitter + current RSSI value between TX and RX
         # A random state - comes from random fixed TX location, random TX beam from its codebook, random RX beam from its codebook
         self.obs = np.concatenate((self.h.ravel(), np.array([self.rssi_val])), axis=0)
-
+        self.rbdir_count = 0
         return self.obs
 
     def render(self, mode='human', close=False):
