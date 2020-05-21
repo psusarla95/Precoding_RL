@@ -153,7 +153,7 @@ class CombRF_Env(gym.Env):
         Es = db2lin(self.P_tx) #* (1e-3 / self.B)
         SNR = Es * np.abs(rssi_val)**2 / self.N0
         self.rate =  np.log2(1 + SNR) * 1e-9  # in Gbit/s (self.B / self.nFFT) *
-        print(self.rate, self.cap)
+
         return self.rate/self.cap #np.abs(rssi_val)**2 /np.square(np.linalg.norm(self.h*self.N_tx*self.N_rx))#
 
     def _gameover(self):
