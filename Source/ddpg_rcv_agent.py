@@ -1,5 +1,6 @@
 import random
 import copy
+import math
 import numpy as np
 from collections import namedtuple, deque
 
@@ -71,7 +72,7 @@ class Agent():
 
         if add_noise:
             action += self.noise.sample()
-        return np.clip(action, -1,1)
+        return np.clip(action, 0,2*math.pi)
 
     def reset(self):
         self.noise.reset()
@@ -106,7 +107,7 @@ class Agent():
         #minimize the loss
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        torch.nn.utils.clip_grad_norm(self.critic_local.parameters(), 1) #clip local gradients of critic
+        torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(), 1) #clip local gradients of critic
         self.critic_optimizer.step()
 
         #update actor
@@ -173,7 +174,7 @@ class ReplayBuffer:
         """
         self.action_size = action_size
         self.memory = deque(maxlen=buffer_size)
-        self.bach_size = batch_size
+        self.batch_size = batch_size
         self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
         self.seed = random.seed(seed)
 
