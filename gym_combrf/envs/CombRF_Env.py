@@ -131,7 +131,7 @@ class CombRF_Env(gym.Env):
 
         r_bdir = self.action_space.sample()[0] #select a random receive direction
         wRF = ula.steervec(self.N_rx, r_bdir, 0)
-        self.rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.h[:, :, 0])).dot(self.tx_beam) + (np.conj(wRF.T).dot(self.noise))[0]
+        self.rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.h[:, :, 0])).dot(self.tx_beam)+ (np.conj(wRF.T).dot(self.noise))[0]
 
         # state should be a factor of affective channel at transmitter + current RSSI value between TX and RX
         # A random state - comes from random fixed TX location, random TX beam from its codebook, random RX beam from its codebook
@@ -145,7 +145,7 @@ class CombRF_Env(gym.Env):
 
     def get_capacity(self):
         #C= log2(1+P|h*n_r*n_t|^2 /N0
-        C = np.log2(1+ (db2lin(self.P_tx)*np.square(np.linalg.norm(self.h*np.sqrt(self.N_tx*self.N_rx))))/self.N0)*1e-9
+        C = np.log2(1+ (db2lin(self.P_tx)*((np.square(np.linalg.norm(self.h))*self.N_tx*self.N_rx)+ np.linalg.norm(self.noise[0])**2))/self.N0)*1e-9
         return C
 
     def get_reward(self, rssi_val):
