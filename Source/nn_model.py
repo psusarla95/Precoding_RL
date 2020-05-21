@@ -15,7 +15,7 @@ class Actor(nn.Module):
     Actor-policy model (mu)
     """
 
-    def __init__(self, state_size, action_size, seed, fc1=32, fc2=32):
+    def __init__(self, state_size, action_size, seed, fc1=64, fc2=32):
         """Initialize parameters and build model.
             Params
             ======
@@ -49,7 +49,7 @@ class Actor(nn.Module):
         # (1) hidden linear layer
         t = self.fc1(t)
         t = F.relu(t)
-        t = self.bn1(t)
+        ##t = self.bn1(t)
 
         # (2) hidden linear layer
         t = self.fc2(t)
@@ -57,7 +57,7 @@ class Actor(nn.Module):
 
         # (3) Output layer
         t = self.fc3(t)
-        t = F.tanh(t)
+        t = torch.tanh(t)
 
         return t
 
@@ -66,7 +66,7 @@ class Critic(nn.Module):
     """
     Build a Critic-Value network - learns a (state, action)-value distribution
     """
-    def __init__(self, state_size, action_size, seed, fcs1_units = 32, fc2_units = 32):
+    def __init__(self, state_size, action_size, seed, fcs1_units = 64, fc2_units = 32):
         """
         Initialize parameters and build model
         :param state_size (int): dimension of each state
