@@ -98,18 +98,18 @@ class CombRF_Env(gym.Env):
         assert self.action_space.contains(action), "%r (%s) invalid" % (action, type(action))
 
         #derive channel from obs space
-        h = self.obs[:-1]
+        #h = self.obs[:-1]
+        h = np.array(self.obs[:self.N_rx*self.N_tx], dtype=np.complex) #pick the real part of eff channel from observations
+        h.imag = self.obs[self.N_rx*self.N_tx:2*self.N_rx*self.N_tx]
         h = h.reshape(self.N_rx, self.N_tx, 1)
 
         wRF = ula.steervec(self.N_rx, action[0], 0)
-        rssi_val = np.abs(
-            np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(h[:, :, 0])).dot(self.tx_beam) +
-            (np.conj(wRF.T).dot(self.noise))[0]) ** 2
+        rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(h[:, :, 0])).dot(self.tx_beam) + (np.conj(wRF.T).dot(self.noise))[0]
 
         #compute reward based on previous rssi value
         rwd = self.get_reward(rssi_val)
         self.rwd_sum = self.rwd_sum + rwd
-        self.obs = np.concatenate((self.obs[:-1], np.array([rssi_val])), axis=0)
+        self.obs = np.concatenate((self.obs[:-2], np.array([rssi_val.real]), np.array([rssi_val.imag])), axis=0)
         self.rbdir_count = self.rbdir_count + 1
         done = self._gameover()
 
@@ -135,7 +135,8 @@ class CombRF_Env(gym.Env):
 
         # state should be a factor of affective channel at transmitter + current RSSI value between TX and RX
         # A random state - comes from random fixed TX location, random TX beam from its codebook, random RX beam from its codebook
-        self.obs = np.concatenate((self.h.ravel(), np.array([self.rssi_val])), axis=0)
+        #self.obs = np.concatenate((self.h.ravel(), np.array([self.rssi_val])), axis=0)
+        self.obs = np.concatenate((self.h.real.ravel(), self.h.imag.ravel(), np.array([self.rssi_val.real]), np.array([self.rssi_val.imag])), axis=0)
         self.rbdir_count = 0
         return self.obs
 
@@ -144,16 +145,16 @@ class CombRF_Env(gym.Env):
 
     def get_capacity(self):
         #C= log2(1+P|h*n_r*n_t|^2 /N0
-        C = np.log2(1+ (db2lin(self.P_tx)*np.square(np.linalg.norm(self.h*self.N_tx*self.N_rx)))/self.N0)
+        C = np.log2(1+ (db2lin(self.P_tx)*np.square(np.linalg.norm(self.h*np.sqrt(self.N_tx*self.N_rx))))/self.N0)*1e-9
         return C
 
     def get_reward(self, rssi_val):
         #transmission energy
-        Es = db2lin(self.P_tx) * (1e-3 / self.B)
+        Es = db2lin(self.P_tx) #* (1e-3 / self.B)
         SNR = Es * np.abs(rssi_val)**2 / self.N0
-        self.rate = self.B / self.nFFT * np.log2(1 + SNR) * 1e-9  # in Gbit/s
-
-        return self.rate/self.cap
+        self.rate =  np.log2(1 + SNR) * 1e-9  # in Gbit/s (self.B / self.nFFT) *
+        print(self.rate, self.cap)
+        return self.rate/self.cap #np.abs(rssi_val)**2 /np.square(np.linalg.norm(self.h*self.N_tx*self.N_rx))#
 
     def _gameover(self):
         if (self.rbdir_count == self.N_rx):
