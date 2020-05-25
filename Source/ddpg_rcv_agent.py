@@ -12,7 +12,7 @@ import torch.nn.functional as F
 
 BUFFER_SIZE =int(1e6)
 LR_ACTOR =2e-4
-LR_CRITIC = 2e-4
+LR_CRITIC = 2e-3
 WEIGHT_DECAY = 0 #L2 weight decay
 BATCH_SIZE = 128 #minibatch size
 GAMMA = 0.99 #discount factor
@@ -69,9 +69,11 @@ class Agent():
         with torch.no_grad():
             action =self.actor_local(state_tensor).cpu().data.numpy()
         self.actor_local.train()
-
+        #print(action)
         if add_noise:
             action += self.noise.sample()
+        if(math.isnan(action)):
+            print(action, state_tensor, state)
         return np.clip(action, 0,2*math.pi)
 
     def reset(self):
