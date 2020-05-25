@@ -37,7 +37,7 @@ class Actor(nn.Module):
     def reset_parameters(self):
         self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
         self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
-        self.fc3.weight.data.uniform_(-3e-3,3e-3)
+        self.fc3.weight.data.uniform_(0,2*np.pi)
 
     def forward(self, state_tensor):
         """
@@ -57,7 +57,7 @@ class Actor(nn.Module):
 
         # (3) Output layer
         t = self.fc3(t)
-        t = torch.tanh(t)
+        t = F.relu(t)
 
         return t
 
@@ -88,7 +88,7 @@ class Critic(nn.Module):
     def reset_parameters(self):
         self.fcs1.weight.data.uniform_(*hidden_init(self.fcs1))
         self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
-        self.fc3.weight.data.uniform_(-3e-3,3e-3)
+        self.fc3.weight.data.uniform_(0,2*np.pi)
 
     def forward(self, state_tensor, action_tensor):
         xs =F.relu(self.fcs1(state_tensor))
