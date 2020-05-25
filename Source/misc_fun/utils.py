@@ -4,6 +4,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 is_ipython = 'inline' in matplotlib.get_backend()
 if is_ipython: from IPython import display
+from Source.antenna import ula
 
 '''
 
@@ -63,3 +64,38 @@ def get_moving_average(period, values):
     else:
         moving_avg = torch.zeros(len(values))
         return moving_avg.numpy()
+
+
+def plotbeam_codebook(beam_vec, codebook):
+    #w = ula.steervec(n, ang, 0)#np.array(array_factor(d,ang, n))
+    #print(w.shape)
+    wh = beam_vec.T.conj()
+    r = np.arange(0, 1, 0.001)
+    theta = 2* np.pi * r
+    #wh= wh.reshape(,)
+    #print(wh, w)
+    gr = np.abs(np.array([wh.dot(ula.steervec(n, x, 0)) for x in theta]))#ula.steervec(n, x, 0)
+    #print("gr:{0}".format(gr))
+    #ax = plt.subplot(111, projection='polar')
+    ##print(theta.shape, gr.shape)
+    #ax.plot(theta, gr)
+    #plt.show()
+    return theta, gr
+
+'''
+def plotbeam(ang, n):
+    w = ula.steervec(n, ang, 0)#np.array(array_factor(d,ang, n))
+    #print(w.shape)
+    wh = w.T.conj()
+    r = np.arange(0, 1, 0.001)
+    theta = 2* np.pi * r
+    #wh= wh.reshape(,)
+    #print(wh, w)
+    gr = np.abs(np.array([wh.dot(ula.steervec(n, x, 0)) for x in theta]))#ula.steervec(n, x, 0)
+    #print("gr:{0}".format(gr))
+    #ax = plt.subplot(111, projection='polar')
+    ##print(theta.shape, gr.shape)
+    #ax.plot(theta, gr)
+    #plt.show()
+    return theta, gr
+'''
