@@ -76,14 +76,14 @@ class CombRF_Env(gym.Env):
         self.tx_codebook = DFT_Codebook([1, self.N_tx, 1]) #input: n_xyz = [ant_x, ant_y, ant_z]
 
         self.state = None #initial observation
-        self.rate = None #data rate, could be replaced with SNR as well
+        self.rate = 0.0 #data rate, could be replaced with SNR as well
         self.cap = None #capacity of the channel for given conditions
         self.rbdir_count = 0
         self.rwd_sum = 0
 
         self.rx_stepsize = 50 #in m
-        self.rx_xcov = np.arange(-500, 550, self.rx_stepsize)#coverage along x axis
-        self.rx_ycov = np.arange(-500, 550, self.rx_stepsize) #coverage along y axis
+        self.rx_xcov = np.arange(250, 550, self.rx_stepsize)#coverage along x axis
+        self.rx_ycov = np.arange(250, 550, self.rx_stepsize) #coverage along y axis
         self.tx_beam = None
 
         self.aoa_min = 0
@@ -118,7 +118,8 @@ class CombRF_Env(gym.Env):
     def reset(self):
         #select random TX loc from RX coverage area
         self.tx_loc = np.array([[random.choice(self.rx_xcov), random.choice(self.rx_ycov), 0]])
-
+        if(np.all(self.tx_loc == [0,0,0])):
+            self.tx_loc = np.array([[40,40,0]])
         #select random tx beam from its codebook
         self.tx_beam = random.choice(self.tx_codebook)
 
@@ -137,6 +138,7 @@ class CombRF_Env(gym.Env):
         # A random state - comes from random fixed TX location, random TX beam from its codebook, random RX beam from its codebook
         #self.obs = np.concatenate((self.h.ravel(), np.array([self.rssi_val])), axis=0)
         self.obs = np.concatenate((self.h.real.ravel(), self.h.imag.ravel(), np.array([self.rssi_val.real]), np.array([self.rssi_val.imag])), axis=0)
+        #print(r_bdir, self.tx_loc)
         self.rbdir_count = 0
         return self.obs
 
@@ -152,12 +154,21 @@ class CombRF_Env(gym.Env):
         #transmission energy
         Es = db2lin(self.P_tx) #* (1e-3 / self.B)
         SNR = Es * np.abs(rssi_val)**2 / self.N0
-        self.rate =  np.log2(1 + SNR) * 1e-9  # in Gbit/s (self.B / self.nFFT) *
+        rate =  np.log2(1 + SNR) * 1e-9  # in Gbit/s (self.B / self.nFFT) *
 
-        return self.rate/self.cap #np.abs(rssi_val)**2 /np.square(np.linalg.norm(self.h*self.N_tx*self.N_rx))#
+        #if(self.rate/self.cap >= 1):
+        #    return 1.0
+        #else:
+        #    return 0.0#self.rate/self.cap #np.abs(rssi_val)**2 /np.square(np.linalg.norm(self.h*self.N_tx*self.N_rx))#
+        #print(rate, self.rate)
+        rwd=0.0
+        if(rate >= self.rate):
+            rwd = 0.3#rate/self.cap
+        self.rate = rate
+        return rwd
 
     def _gameover(self):
-        if (self.rbdir_count == self.N_rx):
+        if (self.rbdir_count == self.N_rx) or (self.rate/self.cap >=1):
            return True
         else:
             return False
