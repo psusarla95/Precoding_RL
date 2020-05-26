@@ -12,9 +12,9 @@ import torch.nn.functional as F
 
 BUFFER_SIZE =int(1e6)
 LR_ACTOR =2e-4
-LR_CRITIC = 2e-3
+LR_CRITIC = 2e-4
 WEIGHT_DECAY = 0 #L2 weight decay
-BATCH_SIZE = 128 #minibatch size
+BATCH_SIZE = 64 #minibatch size
 GAMMA = 0.99 #discount factor
 TAU=1e-3 #soft update hyper-parameter
 
@@ -61,6 +61,7 @@ class Agent():
         if len(self.memory) > BATCH_SIZE:
             experiences = self.memory.sample()
             self.learn(experiences, GAMMA)
+            #print("learning")
 
     def act(self, state, add_noise=True):
         """ Returns actions for given state as per current policy"""
@@ -68,13 +69,16 @@ class Agent():
         self.actor_local.eval()
         with torch.no_grad():
             action =self.actor_local(state_tensor).cpu().data.numpy()
-        self.actor_local.train()
-        #print(action)
+        #print("old_action: {}", action)
+
+
         if add_noise:
+            self.actor_local.train()
             action += self.noise.sample()
-        if(math.isnan(action)):
-            print(action, state_tensor, state)
-        return np.clip(action, 0,2*math.pi)
+        #print("noise action: {}", action)
+        #if(math.isnan(action)):
+        #    print(action, state_tensor, state)
+        return np.clip(action, 0,1)*2*math.pi
 
     def reset(self):
         self.noise.reset()
@@ -109,7 +113,7 @@ class Agent():
         #minimize the loss
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(), 1) #clip local gradients of critic
+        #torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(), 1) #clip local gradients of critic
         self.critic_optimizer.step()
 
         #update actor
@@ -142,7 +146,7 @@ class Agent():
 class OUNoise:
     """ Ornstein-Uhlenbeck process"""
 
-    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.1):
+    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.3):
         """Initialize parameters and noise process"""
 
         self.mu = mu*np.ones(size)
