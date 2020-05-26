@@ -82,8 +82,8 @@ class CombRF_Env(gym.Env):
         self.rwd_sum = 0
 
         self.rx_stepsize = 50 #in m
-        self.rx_xcov = np.arange(250, 550, self.rx_stepsize)#coverage along x axis
-        self.rx_ycov = np.arange(250, 550, self.rx_stepsize) #coverage along y axis
+        self.rx_xcov = np.arange(-250, 550, self.rx_stepsize)#coverage along x axis
+        self.rx_ycov = np.arange(-250, 550, self.rx_stepsize) #coverage along y axis
         self.tx_beam = None
 
         self.aoa_min = 0
@@ -121,14 +121,18 @@ class CombRF_Env(gym.Env):
         if(np.all(self.tx_loc == [0,0,0])):
             self.tx_loc = np.array([[40,40,0]])
         #select random tx beam from its codebook
-        self.tx_beam = random.choice(self.tx_codebook)
+        #self.tx_beam = random.choice(self.tx_codebook)
 
-        channel = Channel(self.freq, self.tx_loc, self.rx_loc, self.sc_xyz, 'model', self.ch_model, 'nrx', self.N_rx,
+
+        self.channel = Channel(self.freq, self.tx_loc, self.rx_loc, self.sc_xyz, 'model', self.ch_model, 'nrx', self.N_rx,
                                'ntx', self.N_tx, 'nFFT', self.nFFT, 'df', self.df)
 
-        channel.generate_paths()
-        self.h = channel.get_h() #channel coefficient
+        self.channel.generate_paths()
+        self.h = self.channel.get_h() #channel coefficient
         self.cap = self.get_capacity() #Compute capacity of channel for given location
+
+        #project TX in the transmitter direction
+        self.tx_beam = ula.steervec(self.N_tx, self.channel.az_aod[0], self.channel.el_aod[0])
 
         r_bdir = self.action_space.sample()[0] #select a random receive direction
         wRF = ula.steervec(self.N_rx, r_bdir, 0)
@@ -162,10 +166,10 @@ class CombRF_Env(gym.Env):
         #    return 0.0#self.rate/self.cap #np.abs(rssi_val)**2 /np.square(np.linalg.norm(self.h*self.N_tx*self.N_rx))#
         #print(rate, self.rate)
         rwd=0.0
-        if(rate >= self.rate):
+        if(rate > self.rate):
             rwd = 0.3#rate/self.cap
         self.rate = rate
-        return rwd
+        return rwd #self.rate/self.cap
 
     def _gameover(self):
         if (self.rbdir_count == self.N_rx) or (self.rate/self.cap >=1):
