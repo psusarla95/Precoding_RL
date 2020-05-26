@@ -66,10 +66,10 @@ def get_moving_average(period, values):
         return moving_avg.numpy()
 
 
-def plotbeam_codebook(beam_vec, codebook):
-    #w = ula.steervec(n, ang, 0)#np.array(array_factor(d,ang, n))
+def plotbeam(ang, n):
+    w = ula.steervec(n, ang, 0)#np.array(array_factor(d,ang, n))
     #print(w.shape)
-    wh = beam_vec.T.conj()
+    wh = w.T.conj()
     r = np.arange(0, 1, 0.001)
     theta = 2* np.pi * r
     #wh= wh.reshape(,)
@@ -81,7 +81,6 @@ def plotbeam_codebook(beam_vec, codebook):
     #ax.plot(theta, gr)
     #plt.show()
     return theta, gr
-
 '''
 def plotbeam(ang, n):
     w = ula.steervec(n, ang, 0)#np.array(array_factor(d,ang, n))
