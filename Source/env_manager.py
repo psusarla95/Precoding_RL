@@ -17,7 +17,7 @@ class EnvManager():
 
     def reset(self):
         self.obs =self.env.reset()
-        return torch.tensor(self.obs, device=self.device, dtype=torch.complex64).unsqueeze(0)
+        return torch.tensor(self.obs, device=self.device, dtype=torch.float32)#.unsqueeze(0)
 
     def close(self):
         self.env.close()
@@ -26,11 +26,16 @@ class EnvManager():
         action = action_tensor.item()
         next_state, reward, done, _ = self.env.step(action)
 
-        next_state_tensor = torch.tensor(next_state, device=self.device, dtype=torch.float32).unsquueze(0)
+        next_state_tensor = torch.tensor(next_state, device=self.device, dtype=torch.float32)#.unsquueze(0)
         reward_tensor = torch.tensor([reward], device=self.device)
         done_tensor = torch.tensor([done], device=self.device)
 
         return next_state_tensor, reward_tensor, done_tensor, _
 
+    def num_actions_available(self):
+        return self.env.action_space.n
 
+    def state_size(self):
+        self.obs = self.env.reset()
+        return self.obs.shape[1]
 
