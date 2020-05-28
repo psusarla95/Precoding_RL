@@ -89,27 +89,37 @@ class CombRF_Env(gym.Env):
         self.aoa_min = 0
         self.aoa_max= 2*math.pi
         self.action_space = spaces.Box(low=self.aoa_min, high=self.aoa_max, shape=(1,), dtype=np.float32)
+        self.action = None
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
+    def _action(self, action_val):
+        self.action = action_val[0]*(self.action_space.high - self.action_space.low)+ self.action_space.low
+
+
+    #def _reverse_action(self):
+    #    self.action -= self.action_space.low
+
     def step(self, action):
-        assert self.action_space.contains(action), "%r (%s) invalid" % (action, type(action))
+        self._action(action[0])
+
+        assert self.action_space.contains(self.action), "%r (%s) invalid" % (action, type(action))
 
         #derive channel from obs space
         #h = self.obs[:-1]
-        h = np.array(self.obs[:self.N_rx*self.N_tx], dtype=np.complex) #pick the real part of eff channel from observations
-        h.imag = self.obs[self.N_rx*self.N_tx:2*self.N_rx*self.N_tx]
+        h = np.array(self.obs[0][:self.N_rx*self.N_tx], dtype=np.complex) #pick the real part of eff channel from observations
+        h.imag = self.obs[0][self.N_rx*self.N_tx:2*self.N_rx*self.N_tx]
         h = h.reshape(self.N_rx, self.N_tx, 1)
 
-        wRF = ula.steervec(self.N_rx, action[0], 0)
+        wRF = ula.steervec(self.N_rx, self.action[0], 0)
         rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(h[:, :, 0])).dot(self.tx_beam) + (np.conj(wRF.T).dot(self.noise))[0]
 
         #compute reward based on previous rssi value
         rwd = self.get_reward(rssi_val)
         self.rwd_sum = self.rwd_sum + rwd
-        self.obs = np.concatenate((self.obs[:-2], np.array([rssi_val.real]), np.array([rssi_val.imag])), axis=0)
+        self.obs = np.array([np.concatenate((self.obs[0][:-2], np.array([rssi_val.real]), np.array([rssi_val.imag])), axis=0)])
         self.rbdir_count = self.rbdir_count + 1
         done = self._gameover()
 
@@ -141,7 +151,7 @@ class CombRF_Env(gym.Env):
         # state should be a factor of affective channel at transmitter + current RSSI value between TX and RX
         # A random state - comes from random fixed TX location, random TX beam from its codebook, random RX beam from its codebook
         #self.obs = np.concatenate((self.h.ravel(), np.array([self.rssi_val])), axis=0)
-        self.obs = np.concatenate((self.h.real.ravel(), self.h.imag.ravel(), np.array([self.rssi_val.real]), np.array([self.rssi_val.imag])), axis=0)
+        self.obs = np.array([np.concatenate((self.h.real.ravel(), self.h.imag.ravel(), np.array([self.rssi_val.real]), np.array([self.rssi_val.imag])), axis=0)])
         #print(r_bdir, self.tx_loc)
         self.rbdir_count = 0
         return self.obs
