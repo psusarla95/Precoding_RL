@@ -4,7 +4,7 @@ import math
 import numpy as np
 from collections import namedtuple, deque
 
-from Source.nn_model import Actor, Critic
+from Source.nn_model_2 import Actor, Critic
 
 import torch
 import torch.optim as optim
@@ -16,7 +16,7 @@ LR_CRITIC = 2e-4
 WEIGHT_DECAY = 0 #L2 weight decay
 BATCH_SIZE = 64 #minibatch size
 GAMMA = 0.99 #discount factor
-TAU=1e-3 #soft update hyper-parameter
+TAU=1e-2 #soft update hyper-parameter
 
 device =torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -68,9 +68,10 @@ class Agent():
         state_tensor = torch.from_numpy(state).float().to(device)
         self.actor_local.eval()
         with torch.no_grad():
+            #print(state_tensor.size())
             action =self.actor_local(state_tensor).cpu().data.numpy()
         #print("old_action: {}", action)
-
+        self.old_action = action
 
         if add_noise:
             self.actor_local.train()
@@ -78,7 +79,8 @@ class Agent():
         #print("noise action: {}", action)
         #if(math.isnan(action)):
         #    print(action, state_tensor, state)
-        return np.clip(action, 0,1)*2*math.pi
+        action = np.clip(action, -1,1)
+        return (action+1)/2 #setting range to [0,1]#np.clip(action, 0,1)*2*math.pi
 
     def reset(self):
         self.noise.reset()
@@ -96,12 +98,18 @@ class Agent():
             experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples
             gamma (float): discount factor
         """
+        self.critic_local.train()
+        self.critic_target.train()
+        self.actor_local.train()
+        self.actor_target.train()
+
         states, actions, rewards,next_states, dones =experiences
 
         #update critic
         #get predicted next-state actions andQ values from target models
         actions_next =self.actor_target(next_states)
         Q_targets_next = self.critic_target(next_states, actions_next)
+        #print("Q_targets: ", Q_targets_next.shape)
 
         #compute Q targets for current state
         Q_targets =rewards + (gamma*Q_targets_next*(1-dones))
@@ -142,11 +150,60 @@ class Agent():
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
 
+    def save_checkpoint(self, last_timestep):
+        """
+        Saving the networks and all parameters to a file in 'checkpoint_dir'
+        Arguments:
+            last_timestep:  Last timestep in training before saving
+            replay_buffer:  Current replay buffer
+        """
+        checkpoint_name =  'ep_{}.pth.tar'.format(last_timestep)
+        #logger.info('Saving checkpoint...')
+        checkpoint = {
+            'last_timestep': last_timestep,
+            'actor': self.actor_local.state_dict(),
+            'critic': self.critic_local.state_dict(),
+            'actor_target': self.actor_target.state_dict(),
+            'critic_target': self.critic_target.state_dict(),
+            'actor_optimizer': self.actor_optimizer.state_dict(),
+            'critic_optimizer': self.critic_optimizer.state_dict(),
+            #'replay_buffer': self.memory,
+        }
+        #logger.info('Saving model at timestep {}...'.format(last_timestep))
+        torch.save(checkpoint, checkpoint_name)
+        #gc.collect()
+        #logger.info('Saved model at timestep {} to {}'.format(last_timestep, self.checkpoint_dir))
+
+    def load_checkpoint(self, last_timestep):
+        """
+        Saving the networks and all parameters from a given path. If the given path is None
+        then the latest saved file in 'checkpoint_dir' will be used.
+        Arguments:
+            checkpoint_path:    File to load the model from
+        """
+
+        checkpoint_path = 'ep_{}.pth.tar'.format(last_timestep)
+        key = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+        checkpoint = torch.load(checkpoint_path, map_location=key)
+        start_timestep = checkpoint['last_timestep'] + 1
+        self.actor_local.load_state_dict(checkpoint['actor'])
+        self.critic_local.load_state_dict(checkpoint['critic'])
+        self.actor_target.load_state_dict(checkpoint['actor_target'])
+        self.critic_target.load_state_dict(checkpoint['critic_target'])
+        self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer'])
+        self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer'])
+        #replay_buffer = self.memory#checkpoint['replay_buffer']
+
+#        gc.collect()
+#        logger.info('Loaded model at timestep {} from {}'.format(start_timestep, checkpoint_path))
+        return start_timestep#, replay_buffer
+
 
 class OUNoise:
     """ Ornstein-Uhlenbeck process"""
 
-    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.3):
+    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.1):
         """Initialize parameters and noise process"""
 
         self.mu = mu*np.ones(size)
