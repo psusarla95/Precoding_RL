@@ -5,3 +5,7 @@ register(
     entry_point='gym_combrf.envs:CombRF_Env',
 )
 
+register(
+    id='combrf-v2',
+    entry_point='gym_combrf.envs:CombRF_Env_v2',
+)
