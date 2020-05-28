@@ -50,8 +50,9 @@ class Actor(nn.Module):
 
         # (1) hidden linear layer
         t = self.fc1(t)
+        #t = self.bn1(t)
         t = F.relu(t)
-        ##t = self.bn1(t)
+        t = self.bn1(t)
 
         # (2) hidden linear layer
         t = self.fc2(t)
@@ -62,7 +63,7 @@ class Actor(nn.Module):
         t = F.relu(t)
 
         t = self.fc4(t)
-        t = torch.sigmoid(t) #torch.softmax(t, dim=1)
+        t = torch.tanh(t) #torch.softmax(t, dim=1)
 
         return t
 
@@ -84,8 +85,9 @@ class Critic(nn.Module):
         self.seed = torch.manual_seed(seed)
 
         self.fcs1 =nn.Linear(in_features=state_size, out_features=fcs1_units)
-        self.fc2 = nn.Linear(in_features=fcs1_units, out_features=fc2_units)
-        self.fc3 = nn.Linear(in_features=fc2_units+action_size, out_features=fc3_units)
+
+        self.fc2 = nn.Linear(in_features=fc2_units+action_size, out_features=fc2_units)
+        self.fc3 = nn.Linear(in_features=fc2_units, out_features=fc3_units)
         self.fc4 =nn.Linear(in_features=fc3_units, out_features=1)
 
 
@@ -100,8 +102,9 @@ class Critic(nn.Module):
 
     def forward(self, state_tensor, action_tensor):
         xs =F.relu(self.fcs1(state_tensor))
-        xs = F.relu(self.fc2(xs))
+
         xs = self.bn1(xs)
         x = torch.cat((xs, action_tensor), dim=1)
+        x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         return self.fc4(x)
