@@ -90,6 +90,13 @@ class CombRF_Env_v2(gym.Env):
         self.aoa_max= 2*math.pi
         self.action_space = spaces.Discrete(self.N_rx)
         self.action = None
+        self.BeamSet = Generate_BeamDir(self.N_tx)  # Set of all beam directions
+
+        self.obs_space = spaces.MultiDiscrete([len(self.rx_xcov),  # ue_xloc
+                                               len(self.rx_ycov),  # ue_yloc
+                                               self.N_tx, #tx_bdir
+                                               ])
+
 
     def seed(self, seed=0):
         self.np_random, seed = seeding.np_random(seed)
@@ -109,25 +116,45 @@ class CombRF_Env_v2(gym.Env):
 
         #derive channel from obs space
         #h = self.obs[:-1]
-        h = np.array(self.obs[0][:self.N_rx*self.N_tx], dtype=np.complex) #pick the real part of eff channel from observations
-        h.imag = self.obs[0][self.N_rx*self.N_tx:2*self.N_rx*self.N_tx]
-        h = h.reshape(self.N_rx, self.N_tx, 1)
+        #h = np.array(self.obs[0][:self.N_rx*self.N_tx], dtype=np.complex) #pick the real part of eff channel from observations
+        #h.imag = self.obs[0][self.N_rx*self.N_tx:2*self.N_rx*self.N_tx]
+        #h = h.reshape(self.N_rx, self.N_tx, 1)
 
-        wRF = ula.steervec(self.N_rx, action*(np.pi/self.N_rx), 0)#self.codebook[:,action[0]]#ula.steervec(self.N_rx, action[0], 0)
-        rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(h[:, :, 0])).dot(self.tx_beam) + (np.conj(wRF.T).dot(self.noise))[0]
+        wRF = ula.steervec(self.N_rx, self.BeamSet[action], 0)#self.codebook[:,action[0]]#ula.steervec(self.N_rx, action[0], 0)
+        #rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.h[:, :, 0])).dot(self.tx_beam) + (np.conj(wRF.T).dot(self.noise))[0]
+        self.rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.eff_ch)) + (np.conj(wRF.T).dot(self.noise))[0]
 
         #compute reward based on previous rssi value
-        rwd = self.get_reward(rssi_val)
-        self.rwd_sum = self.rwd_sum + rwd
-        self.obs = np.array([np.concatenate((self.obs[0][:-2], np.array([rssi_val.real]), np.array([rssi_val.imag])), axis=0)])
-        self.rbdir_count = self.rbdir_count + 1
+        rwd = self.get_reward(self.rssi_val)
         done = self._gameover()
+        self.rwd_sum = self.rwd_sum + rwd
+
+        self.rx_bdir = self.BeamSet[action]
+        #if((0<(self.rx_bdir -self.tx_bdir) < np.pi/2) or (0< (np.pi-(self.rx_bdir -self.tx_bdir)) < np.pi/2)):
+        #    self.tx_bdir = self.tx_bdir + (self.aoa_max-self.aoa_min)/self.N_tx
+        #elif((0<(self.tx_bdir -self.rx_bdir) < np.pi/2) or (0< (np.pi-(self.tx_bdir -self.rx_bdir)) < np.pi/2)):
+        #    self.tx_bdir = self.tx_bdir - (self.aoa_max - self.aoa_min) / self.N_tx
+        #else:
+        #    self.tx_bdir = self.tx_bdir
+        #self.obs = np.array([np.concatenate((self.obs[0][:-2], np.array([rssi_val.real]), np.array([rssi_val.imag])), axis=0)])
+
+        #self.tx_beam = ula.steervec(self.N_tx, self.tx_bdir, 0)
+        #self.eff_ch = np.array(self.h[:, :, 0]).dot(self.tx_beam)
+
+        self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]),
+                                             self.eff_ch.real.ravel(), self.eff_ch.imag.ravel()), axis=0)])
+        #self.obs = np.array([[rssi_val.real, rssi_val.imag, self.tx_bdir]])
+        self.rbdir_count = self.rbdir_count + 1
+
 
         return self.obs, rwd, done, {}
 
     def reset(self):
         #select random TX loc from RX coverage area
-        self.tx_loc = np.array([[random.choice(self.rx_xcov), random.choice(self.rx_ycov), 0]])
+        #self.tx_loc = np.array([[random.choice(self.rx_xcov), random.choice(self.rx_ycov), 0]])
+        tx_loc_xndx, tx_loc_yndx, tx_dir_ndx =self.obs_space.sample()
+        self.tx_loc = np.array([[self.rx_xcov[tx_loc_xndx],self.rx_ycov[tx_loc_yndx], 0]])
+
         if(np.all(self.tx_loc == [0,0,0])):
             self.tx_loc = np.array([[40,40,0]])
         #select random tx beam from its codebook
@@ -142,18 +169,25 @@ class CombRF_Env_v2(gym.Env):
         self.cap = self.get_capacity() #Compute capacity of channel for given location
 
         #project TX in the transmitter direction
-        self.tx_beam = ula.steervec(self.N_tx, self.channel.az_aod[0], self.channel.el_aod[0])
+        #self.tx_beam = ula.steervec(self.N_tx, self.channel.az_aod[0], self.channel.el_aod[0])
+        self.tx_bdir = self.BeamSet[tx_dir_ndx]#self.channel.az_aod[0]#
+        self.tx_beam = ula.steervec(self.N_tx, self.BeamSet[tx_dir_ndx], 0)
 
-        r_bdir = self.action_space.sample() #select a random receive direction
-        wRF = ula.steervec(self.N_rx, r_bdir, 0)
-        self.rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.h[:, :, 0])).dot(self.tx_beam)+ (np.conj(wRF.T).dot(self.noise))[0]
+        rbdir_ndx = self.action_space.sample() #select a random receive direction
+        self.rx_bdir = self.BeamSet[rbdir_ndx]
+        wRF = ula.steervec(self.N_rx, self.rx_bdir , 0)
+        self.eff_ch = np.array(self.h[:,:,0]).dot(self.tx_beam)
+        self.rssi_val = np.sqrt(self.N_rx*self.N_tx)*np.array(np.conj(wRF.T).dot(self.eff_ch)) + (np.conj(wRF.T).dot(self.noise))[0]
+        #self.rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.h[:, :, 0])).dot(self.tx_beam)+ (np.conj(wRF.T).dot(self.noise))[0]
 
         # state should be a factor of affective channel at transmitter + current RSSI value between TX and RX
         # A random state - comes from random fixed TX location, random TX beam from its codebook, random RX beam from its codebook
         #self.obs = np.concatenate((self.h.ravel(), np.array([self.rssi_val])), axis=0)
-        self.obs = np.array([np.concatenate((self.h.real.ravel(), self.h.imag.ravel(), np.array([self.rssi_val.real]), np.array([self.rssi_val.imag])), axis=0)])
+        #self.obs = np.array([np.concatenate((self.h.real.ravel(), self.h.imag.ravel(), np.array([self.rssi_val.real]), np.array([self.rssi_val.imag])), axis=0)])
+        #self.obs = np.array([[self.rssi_val.real, self.rssi_val.imag, self.tx_bdir]])
+        self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]), self.eff_ch.real.ravel(), self.eff_ch.imag.ravel()), axis=0)])
         #print(r_bdir, self.tx_loc)
-        self.rbdir_count = 0
+        self.rbdir_count = 1
         return self.obs
 
     def render(self, mode='human', close=False):
@@ -175,14 +209,32 @@ class CombRF_Env_v2(gym.Env):
         #else:
         #    return 0.0#self.rate/self.cap #np.abs(rssi_val)**2 /np.square(np.linalg.norm(self.h*self.N_tx*self.N_rx))#
         #print(rate, self.rate)
-        #rwd=0.0
-        #if(rate > self.rate):
-        #    rwd = 0.3#rate/self.cap
-        #self.rate = rate
-        return rate/self.cap
+        rwd=0.0
+        if(rate > self.rate):
+            rwd = 1.0*math.exp(-1*self.rbdir_count)#rate/self.cap
+        self.rate = rate
+        return rwd#self.rate/self.cap
 
     def _gameover(self):
-        if (self.rbdir_count == self.N_rx) or (self.rate/self.cap >=1):
+        if (self.rbdir_count == self.N_rx) or (self.tx_bdir == self.rx_bdir) or (abs(self.tx_bdir-self.rx_bdir)==np.pi):
            return True
         else:
             return False
+
+def Generate_BeamDir(N):
+    #if np.min(self.ue_xloc) < 0 and np.max(self.ue_xloc) > 0:
+
+    min_ang = 0#-math.pi/2
+    max_ang = np.pi#math.pi/2
+    step_size = (max_ang-min_ang)/N
+    beam_angles = np.arange(min_ang+step_size, max_ang+step_size, step_size)
+
+    BeamSet = []#np.zeros(N)#np.fft.fft(np.eye(N))
+
+    #B_i = (i)pi/(N-1), forall 0 <= i <= N-1; 0< beta < pi/(N-1)
+    val = min_ang
+    for i in range(N):
+        BeamSet.append(np.arctan2(np.sin(beam_angles[i]), np.cos(beam_angles[i])))#(i+1)*(max_ang-min_ang)/(N)
+
+    return np.array(BeamSet) #eval(strBeamSet_list)#np.ndarray.tolist(BeamSet)
+
