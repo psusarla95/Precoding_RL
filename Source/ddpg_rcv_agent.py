@@ -4,19 +4,19 @@ import math
 import numpy as np
 from collections import namedtuple, deque
 
-from Source.nn_model_2 import Actor, Critic
+from Source.nn_model import Actor, Critic
 
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
 
-BUFFER_SIZE =int(1e6)
-LR_ACTOR =2e-4
-LR_CRITIC = 2e-4
+BUFFER_SIZE =int(1e5)
+LR_ACTOR =1e-4
+LR_CRITIC = 1e-3
 WEIGHT_DECAY = 0 #L2 weight decay
-BATCH_SIZE = 64 #minibatch size
+BATCH_SIZE = 128 #minibatch size
 GAMMA = 0.99 #discount factor
-TAU=1e-2 #soft update hyper-parameter
+TAU=1e-3 #soft update hyper-parameter
 
 device =torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -80,7 +80,7 @@ class Agent():
         #if(math.isnan(action)):
         #    print(action, state_tensor, state)
         action = np.clip(action, -1,1)
-        return (action+1)/2 #setting range to [0,1]#np.clip(action, 0,1)*2*math.pi
+        return action #setting range to [0,1]#np.clip(action, 0,1)*2*math.pi
 
     def reset(self):
         self.noise.reset()
@@ -203,7 +203,7 @@ class Agent():
 class OUNoise:
     """ Ornstein-Uhlenbeck process"""
 
-    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.1):
+    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.2):
         """Initialize parameters and noise process"""
 
         self.mu = mu*np.ones(size)
