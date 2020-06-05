@@ -17,7 +17,7 @@ class QNetwork(nn.Module):
         super(QNetwork, self).__init__()
         self.seed = torch.manual_seed(seed)
 
-        hidden_layers = [256,256,64]
+        hidden_layers = [400,400,64]
         drop_p =0.5
 
         #add the first hidden layer
