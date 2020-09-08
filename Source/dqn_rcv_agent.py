@@ -2,6 +2,7 @@ import numpy as np
 import random
 import math
 from collections import namedtuple, deque
+import pickle
 from Source.nn_model_dqn import QNetwork
 
 import torch
@@ -27,7 +28,7 @@ class Agent():
         :param seed (int): random seed
         """
         self.action_size = action_size
-        self.seed = random.seed(seed)
+        self.seed = np.random.seed(seed)
         self.strategy = strategy
         self.current_step = 0
         self.device = device
@@ -40,13 +41,18 @@ class Agent():
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=LR)
         self.qnetwork_target.eval()
 
-
+        self.randaction_list = []
+        self.dqnaction_list = []
+        self.max_limit = 8
+        self.action_flag =-1
+        self.actionflag_list =[]
         #Initialize tstep (for updating every UPDATE_EVERY steps)
         self.t_step = 0
 
     def step(self, state, action, reward, next_state, done):
         #Save the experience in replay memory
         self.memory.add(state, action, reward, next_state, done)
+        self.action_flag = -1
 
         #Learn every UPDATE_EVERY time steps
         self.t_step = (self.t_step +1) % UPDATE_EVERY
@@ -59,26 +65,51 @@ class Agent():
             return None
         return None
 
-    def act(self, state_tensor, qnetwork):
+    def act(self, state_tensor, qnetwork, eps, episode_length):
         """
         Returns actions for given states based on current policy
         :param state (array_like): current_state
         :param eps (float): epsilon, for epsilon-greedy action selection
         :return: Action
         """
-        eps = self.strategy.get_exploration_rate(self.current_step)
+        #eps = self.strategy.get_exploration_rate(self.current_step)
         #self.current_step +=1
 
-        if eps > random.random():
-            action = random.randrange(self.action_size) #explore
-            return torch.tensor([action]).to(self.device)
+        if eps > np.random.random():
+            #actions = np.random.choice(np.arange(0,self.action_size), size=self.max_limit, replace=False)#random.randrange(self.action_size) #explore
+            action = random.randrange(0,self.action_size)
+            self.action_flag = 0
+            #if (action == 1):
+            #    for i in range(self.max_limit):
+            #        action = random.randrange(0, self.action_size)
+            #        if not (action == 1):
+            #            return torch.tensor(np.array([action]), dtype=torch.long).to(self.device)
+            #for action in actions:
+            #    if (action not in self.randaction_list):
+            #       self.randaction_list.append(action)
+            #        return torch.tensor([action], dtype=torch.long).to(self.device)
+            #action = np.random.choice(np.arange(0,self.action_size,1), size=None)
+            return torch.tensor(np.array([action]), dtype=torch.long).to(self.device)
         else:
             qnetwork.eval()
+            self.action_flag = 1
             with torch.no_grad():
                 action_tensor = qnetwork(state_tensor).argmax(dim=1).to(self.device)  #exploit
+                #action_vals = qnetwork(state_tensor).data.cpu().numpy()[0]
+                #actions = np.argsort(action_vals)[::-1]
+                #print(action_vals, actions, self.dqnaction_list)
+                #for i in range(min(len(actions), episode_length)):
+                    #print(i)
+                #    if actions[i] not in self.dqnaction_list:
+                #        action_tensor = torch.tensor(np.array([actions[i]]), dtype=torch.long).to(self.device)
+                #        self.dqnaction_list.append(actions[i])
+                #self.dqnaction_list.append(action_tensor.item())
                 qnetwork.train()
                 return action_tensor
-
+                #action_tensor = torch.tensor(np.array([actions[0]]), dtype=torch.long).to(self.device)
+                #self.dqnaction_list.append(actions[0])
+                #qnetwork.train()
+                #return action_tensor
         #print("[Agent] state: {}".format(state))
         #self.qnetwork_local.eval()
         #with torch.no_grad():
@@ -139,6 +170,7 @@ class Agent():
             target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
 
 
+experience =namedtuple("experience", field_names=["state", "action", "reward", "next_state", "next_action", "done"])
 class ReplayBuffer:
     """
     Fixed-size buffer to store experience tuples
@@ -160,12 +192,13 @@ class ReplayBuffer:
         self.action_size = action_size
         self.memory = deque(maxlen=buffer_size)
         self.batch_size = batch_size
-        self.experience =namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
+        #self.experience =namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
         self.seed =random.seed(seed)
         self.device = device
 
-    def add(self, state, action, reward, next_state, done):
-        e = self.experience(state, action, reward, next_state, done)
+    def add(self, state, action, reward, next_state, next_action, done):
+        #e = self.experience(state, action, reward, next_state, done)
+        e = experience(state, action, reward, next_state, next_action, done)
         self.memory.append(e)
 
     def sample(self):
@@ -174,12 +207,14 @@ class ReplayBuffer:
 
         experiences = [e for e in experiences if e is not None]
         #Convert batch of experiences to experiences of batches
-        batch = self.experience(*zip(*experiences))
+        #batch = self.experience(*zip(*experiences))
+        batch = experience(*zip(*experiences))
         #print(batch.reward)
         states = torch.cat(batch.state).to(self.device)
         actions = torch.cat(batch.action).to(self.device)
         rewards = torch.cat(batch.reward).to(self.device)
         next_states = torch.cat(batch.next_state).to(self.device)
+        next_actions = torch.cat(batch.next_action).to(self.device)
         dones = torch.cat(batch.done).to(self.device)
         #states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(self.device)
         #actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).long().to(self.device)
@@ -187,7 +222,7 @@ class ReplayBuffer:
         #next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(self.device)
         #dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(self.device)
 
-        return (states, actions, rewards, next_states, dones)
+        return (states, actions, rewards, next_states, next_actions, dones)
 
     def can_provide_sample(self):
         return len(self.memory) >= self.batch_size
@@ -196,14 +231,21 @@ class ReplayBuffer:
         "Return the current size of replay memory"
         return len(self.memory)
 
+    def save(self, filename):
+        with open(filename, 'wb') as f:
+            torch.save(self.memory, f)
+
 
 
 class EpsilonGreedyStrategy():
-    def __init__(self, start, end, decay):
+    def __init__(self, start, end, decay, total_tsteps):
         self.start = start
         self.end = end
         self.decay = decay
+        self.scheduled_timesteps = total_tsteps
 
     def get_exploration_rate(self, current_step):
         #return self.end + (self.start - self.end)*math.exp(-1. * current_step* self.decay)
-        return max(self.end, (self.decay)**current_step)
+        decay = min(float(current_step)/self.scheduled_timesteps, 1.0)
+        return self.start + decay*(self.end - self.start)
+        #return max(self.end, (self.start)*((self.decay)**current_step))

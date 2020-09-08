@@ -28,9 +28,12 @@ class QNetwork(nn.Module):
         self.hidden_layers.extend([nn.Linear(h1, h2) for h1, h2 in layer_sizes])
         self.hidden_layers.apply(self._init_weights)
 
+        self.softmax = nn.Softmax(dim=1)
         #create an output layer
         self.output =nn.Linear(hidden_layers[-1], action_size)
-        nn.init.xavier_uniform_(self.output.weight)
+        #nn.init.xavier_uniform_(self.output.weight)
+        nn.init.kaiming_uniform_(self.output.weight, mode='fan_in', nonlinearity='relu')
+        #nn.init.kaiming_normal_(self.output.weight, mode='fan_in', nonlinearity='relu')
         nn.init.zeros_(self.output.bias)
         #self.dropout = nn.Dropout(drop_p)
 
@@ -44,8 +47,10 @@ class QNetwork(nn.Module):
         #forward through each layer in"hidden layer",with ReLU activation unit between them
         for linear in self.hidden_layers:
             state = F.relu(linear(state))
+            #state = torch.sigmoid(linear(state))
             #state = self.dropout(state)
-        state = self.output(state)
+        state = self.softmax(self.output(state))
+        #state = self.output(state)
         return state
 
     def _init_weights(self, m):
@@ -55,10 +60,6 @@ class QNetwork(nn.Module):
 
 
 '''
-def hidden_init(layer):
-    fan_in = layer.weight.data.size()[0]
-    lim = 1. /np.sqrt(fan_in)
-    return(-lim, lim)
 
 class QNetwork(nn.Module):
     """
@@ -78,33 +79,37 @@ class QNetwork(nn.Module):
         super(QNetwork, self).__init__()
         self.seed = torch.manual_seed(seed)
 
-        fc1 = 64
-        fc2 = 8
-        fc3 = 16
+        fc11 = 128
+        fc12 = 64
+        fc21 = 128
+        fc22 = 64
+        fc3 = 64
 
         # add the first hidden layer
-        self.fc11 =nn.Linear(in_features=state_size-2, out_features=fc1)
-        self.fc12 = nn.Linear(in_features=2, out_features=fc2)
+        self.fc11 =nn.Linear(in_features=state_size-2, out_features=fc11)
+        nn.init.xavier_uniform_(self.fc11.weight)
+        nn.init.zeros_(self.fc11.bias)
 
-        self.fc21 = nn.Linear(in_features=fc1, out_features=fc2)
-        self.fc22 = nn.Linear(in_features=fc2, out_features=fc2)
+        self.fc12 = nn.Linear(in_features=2, out_features=fc12)
+        nn.init.xavier_uniform_(self.fc12.weight)
+        nn.init.zeros_(self.fc12.bias)
+
+        self.fc21 = nn.Linear(in_features=fc11, out_features=fc21)
+        nn.init.xavier_uniform_(self.fc21.weight)
+        nn.init.zeros_(self.fc21.bias)
+
+        self.fc22 = nn.Linear(in_features=fc12, out_features=fc22)
+        nn.init.xavier_uniform_(self.fc22.weight)
+        nn.init.zeros_(self.fc22.bias)
 
         #self.fc3 =nn.Linear(in_features=fc3, out_features=fc3)
-        self.fc3 = nn.Linear(in_features=fc3, out_features=action_size)
-        self.bn11 =nn.BatchNorm1d(state_size-2) #probably this is not needed
-        self.bn12 = nn.BatchNorm1d(2)
+        self.fc3 = nn.Linear(in_features=(fc21+fc22), out_features=fc3)
+        nn.init.xavier_uniform_(self.fc3.weight)
+        nn.init.zeros_(self.fc3.bias)
 
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        self.fc11.weight.data.uniform_(*hidden_init(self.fc11))
-        self.fc12.weight.data.uniform_(*hidden_init(self.fc12))
-
-        self.fc21.weight.data.uniform_(*hidden_init(self.fc21))
-        self.fc22.weight.data.uniform_(*hidden_init(self.fc22))
-
-        # self.fc3.weight.data.uniform_(*hidden_init(self.fc3))#0,2*np.pi)
-        self.fc3.weight.data.uniform_(-3e-3, 3e-3)
+        self.fc4 = nn.Linear(in_features=fc3, out_features=action_size)
+        nn.init.xavier_uniform_(self.fc4.weight)
+        nn.init.zeros_(self.fc4.bias)
 
     def forward(self, state_tensor):
         """
@@ -115,12 +120,12 @@ class QNetwork(nn.Module):
 
         # (1) hidden linear layer
         #t1 = self.bn11(t[:,:-2])
-        t1 = t[:, :-2]
+        t1 = t[:, :2]
         t1 = self.fc11(t1)
         t1 = F.relu(t1)
 
         #t2 = self.bn12(t[:,-2:])
-        t2 = t[:,-2:]
+        t2 = t[:,2:]
         t2 = self.fc12(t2)
         t2 = F.relu(t2)
 
@@ -133,13 +138,13 @@ class QNetwork(nn.Module):
 
         #print(t1.shape, t2.shape)
 
-        # (3) Output layer
+        # (3) Third - Combination layer
         t = self.fc3(torch.cat((t1,t2), dim=1))
-        t = torch.tanh(t)
-        #t = F.relu(t)
-
-        #t = self.fc4(t)
-         #torch.softmax(t, dim=1)
+        t = torch.relu(t)
+        # (4) Output layer
+        t = self.fc4(t)
+        t = torch.softmax(t, dim=1)
 
         return t
+
 '''
