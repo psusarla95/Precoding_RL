@@ -210,8 +210,14 @@ class CombRF_Env(gym.Env):
         #    return 0.0#self.rate/self.cap #np.abs(rssi_val)**2 /np.square(np.linalg.norm(self.h*self.N_tx*self.N_rx))#
         #print(rate, self.rate)
         rwd=0.0
+        done = False
+
         if(rate > self.rate):
-            rwd = 0.3#rate/self.cap
+            rwd = 1.0#rate/self.cap
+        elif (self.rbdir_count >= 9): #((rate >= self.rate) and (self.rbdir_count ==2)) or
+            rwd = 0.0
+            done = True
+
         self.rate = rate
         return rwd, done
 
