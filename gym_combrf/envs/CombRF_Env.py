@@ -73,7 +73,7 @@ class CombRF_Env(gym.Env):
             gau[i] = complex(np.random.randn(), np.random.randn())
         self.noise = np.sqrt(self.N0 / 2) * gau
 
-        self.tx_codebook = DFT_Codebook([1, self.N_tx, 1]) #input: n_xyz = [ant_x, ant_y, ant_z]
+        #self.tx_codebook = DFT_Codebook([1, self.N_tx, 1]) #input: n_xyz = [ant_x, ant_y, ant_z]
 
         self.state = None #initial observation
         self.rate = 0.0 #data rate, could be replaced with SNR as well
@@ -126,16 +126,19 @@ class CombRF_Env(gym.Env):
                         (np.conj(wRF.T).dot(self.noise))[0]
 
         #compute reward based on previous rssi value
-        rwd = self.get_reward(self.rssi_val)
+        rwd, done = self.get_reward_goal(self.rssi_val)
         self.rwd_sum = self.rwd_sum + rwd
         #self.obs = np.array([np.concatenate((self.obs[0][:-2], np.array([rssi_val.real]), np.array([rssi_val.imag])), axis=0)])
 
         self.rx_bdir = self.action[0]
+        #self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]),
+        #                                     self.eff_ch.real.ravel(), self.eff_ch.imag.ravel()), axis=0)])
+
         self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]),
-                                             self.eff_ch.real.ravel(), self.eff_ch.imag.ravel()), axis=0)])
+                                             self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
 
         self.rbdir_count = self.rbdir_count + 1
-        done = self._gameover()
+        #done = self._gameover()
 
         return self.obs, rwd, done, {}
 
@@ -174,8 +177,15 @@ class CombRF_Env(gym.Env):
         # A random state - comes from random fixed TX location, random TX beam from its codebook, random RX beam from its codebook
         #self.obs = np.concatenate((self.h.ravel(), np.array([self.rssi_val])), axis=0)
         #self.obs = np.array([np.concatenate((self.h.real.ravel(), self.h.imag.ravel(), np.array([self.rssi_val.real]), np.array([self.rssi_val.imag])), axis=0)])
-        self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]),
-                                             self.eff_ch.real.ravel(), self.eff_ch.imag.ravel()), axis=0)])
+        #self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]),
+        #                                     self.eff_ch.real.ravel(), self.eff_ch.imag.ravel()), axis=0)])
+        self.norm_tx_xloc = np.array(
+            [(self.tx_loc[0][0] + np.max(self.rx_xcov)) / (np.max(self.rx_xcov) - np.min(self.rx_xcov))])
+        self.norm_tx_yloc = np.array(
+            [(self.tx_loc[0][1] + np.max(self.rx_ycov)) / (np.max(self.rx_ycov) - np.min(self.rx_ycov))])
+        self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]), \
+                                             self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
+
         #print(r_bdir, self.tx_loc)
         self.rbdir_count = 1
         return self.obs
@@ -188,7 +198,7 @@ class CombRF_Env(gym.Env):
         C = np.log2(1+ (db2lin(self.P_tx)*((np.square(np.linalg.norm(self.h))*self.N_tx*self.N_rx)+ np.linalg.norm(self.noise[0])**2))/self.N0)*1e-9
         return C
 
-    def get_reward(self, rssi_val):
+    def get_reward_goal(self, rssi_val):
         #transmission energy
         Es = db2lin(self.P_tx) #* (1e-3 / self.B)
         SNR = Es * np.abs(rssi_val)**2 / self.N0
@@ -203,7 +213,7 @@ class CombRF_Env(gym.Env):
         if(rate > self.rate):
             rwd = 0.3#rate/self.cap
         self.rate = rate
-        return rwd #self.rate/self.cap
+        return rwd, done
 
     def _gameover(self):
         if (self.rbdir_count == self.N_rx) or (self.tx_bdir == self.rx_bdir) or (abs(self.tx_bdir-self.rx_bdir)==np.pi):#or (self.rate/self.cap >=1):
