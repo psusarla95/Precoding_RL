@@ -167,6 +167,13 @@ class CombRF_Env_v2(gym.Env):
         #if(np.all(self.tx_loc == [0,0,22.5])):
         #self.tx_loc = np.array([[40,40,22.5]])
 
+        self.dbp = 4*self.tx_loc[0,2]*self.rx_loc[0,2]*self.freq/self.c
+        self.d_2d = np.linalg.norm(np.array([[self.tx_loc[0,0], self.tx_loc[0,1], 0]]) - np.array([[self.rx_loc[0,0], self.rx_loc[0,1], 0]]))
+
+        if(self.dbp <= self.d_2d <= 5e3) and (self.ch_model == 'uma-los'):
+            self.ch_model = self.init_ch_model + '-dbp'
+        else:
+            self.ch_model = self.init_ch_model
 
         self.channel = Channel(self.freq, self.tx_loc, self.rx_loc, self.sc_xyz, 'model', self.ch_model, 'nrx', self.N_rx,
                                'ntx', self.N_tx, 'nFFT', self.nFFT, 'df', self.df)
