@@ -17,11 +17,24 @@ class QNetwork(nn.Module):
         super(QNetwork, self).__init__()
         self.seed = torch.manual_seed(seed)
 
-        hidden_layers = [400,400,64]
+        hidden_layers = [400,256]#[400,400,256]
         drop_p =0.5
 
         #add the first hidden layer
-        self.hidden_layers = nn.ModuleList([nn.Linear(state_size, hidden_layers[0])])
+        fc1=200
+        fc2=state_size-3
+        #print(state_size)
+        self.fc11 = nn.Linear(in_features=state_size - 3, out_features=fc1)
+        self.fc12 = nn.Linear(in_features=3, out_features=fc2)
+        self.fc22 = nn.Linear(in_features=fc2, out_features=fc1)
+        nn.init.kaiming_uniform_(self.fc11.weight, mode='fan_in', nonlinearity='relu')
+        nn.init.kaiming_uniform_(self.fc12.weight, mode='fan_in', nonlinearity='relu')
+        nn.init.kaiming_uniform_(self.fc22.weight, mode='fan_in', nonlinearity='relu')
+        nn.init.zeros_(self.fc11.bias)
+        nn.init.zeros_(self.fc12.bias)
+        nn.init.zeros_(self.fc22.bias)
+        #add the second hidden layer
+        self.hidden_layers = nn.ModuleList([nn.Linear(fc1*2, hidden_layers[0])])
 
         #add a variable number of hidden layers
         layer_sizes = zip(hidden_layers[:-1], hidden_layers[1:])
@@ -43,7 +56,16 @@ class QNetwork(nn.Module):
         :param state: input observation to the network
         :return: probability action outputs from the network architecture
         """
+        # (1) hidden linear layer
+        t1 = self.fc11(state[:,:-3])
+        t1 = F.relu(t1)
 
+        t2 = self.fc12(state[:, -3:])
+        t2 = F.relu(t2)
+        t2 = self.fc22(t2)
+        t2= F.relu(t2)
+
+        state = torch.cat((t1,t2), dim=1)
         #forward through each layer in"hidden layer",with ReLU activation unit between them
         for linear in self.hidden_layers:
             state = F.relu(linear(state))
@@ -55,7 +77,8 @@ class QNetwork(nn.Module):
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
+            #nn.init.xavier_uniform_(m.weight)
+            nn.init.kaiming_uniform_(m.weight, mode='fan_in', nonlinearity='relu')
             nn.init.zeros_(m.bias)
 
 

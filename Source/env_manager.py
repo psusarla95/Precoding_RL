@@ -15,8 +15,8 @@ class EnvManager():
         self.env.seed(seed)
         self.done = False
 
-    def reset(self, ch_randval, eps):
-        self.obs =self.env.reset(ch_randval, eps)
+    def reset(self, tx_num, ch_randval, eps):
+        self.obs =self.env.reset(tx_num, ch_randval, eps)
         return torch.tensor(self.obs, device=self.device, dtype=torch.float32)#.unsqueeze(0)
 
     def test_reset(self, tx_loc, sc, ch_randval, rbdir_ndx, tbdir_ndx=None):
@@ -28,6 +28,7 @@ class EnvManager():
 
     def step(self, action_tensor, ch_randval=None):
         action = action_tensor.item()
+        #print(action)
         #next_state, reward, done, temp_rwd,  _ = self.env.step(action, ch_randval)
         next_state, reward, done, _ = self.env.step(action, ch_randval)
 
@@ -45,4 +46,6 @@ class EnvManager():
     def state_size(self):
         #self.obs = self.env.reset(np.exp(1j * 2 * np.pi * 0.6),0)
         #return len(self.env.obs_space.nvec)+1#self.obs.shape[1]
-        return len(self.env.obs_space.nvec)
+        #return len(self.env.obs_space.nvec)
+        #return 2 + len(self.env.obs_space.nvec) -1
+        return self.env.N_tx*2+self.env.N_rx*2+ len(self.env.obs_space.nvec)

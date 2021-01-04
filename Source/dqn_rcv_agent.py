@@ -33,19 +33,23 @@ class Agent():
         self.current_step = 0
         self.device = device
 
-        self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, seed, self.device)
+        #self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, seed, self.device)
 
         # Q network
-        self.qnetwork_local = QNetwork(state_size, action_size, seed).to(self.device)
-        self.qnetwork_target = QNetwork(state_size, action_size, seed).to(self.device)
-        self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=LR)
-        self.qnetwork_target.eval()
+        #self.qnetwork_local = QNetwork(state_size, action_size, seed).to(self.device)
+        #self.qnetwork_target = QNetwork(state_size, action_size, seed).to(self.device)
+        #self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=LR)
+        #self.qnetwork_target.eval()
 
         self.randaction_list = []
         self.dqnaction_list = []
         self.max_limit = 8
         self.action_flag =-1
         self.actionflag_list =[]
+        self.prev_maxqval = 0
+        self.k = 0
+        self.k_bound =20
+        self.f = 1
         #Initialize tstep (for updating every UPDATE_EVERY steps)
         self.t_step = 0
 
@@ -65,7 +69,7 @@ class Agent():
             return None
         return None
 
-    def act(self, state_tensor, qnetwork, eps, episode_length):
+    def act(self, state_tensor, qnetwork, eps):
         """
         Returns actions for given states based on current policy
         :param state (array_like): current_state
@@ -75,10 +79,24 @@ class Agent():
         #eps = self.strategy.get_exploration_rate(self.current_step)
         #self.current_step +=1
 
+
+
         if eps > np.random.random():
             #actions = np.random.choice(np.arange(0,self.action_size), size=self.max_limit, replace=False)#random.randrange(self.action_size) #explore
+            #cur_maxqval = qnetwork(state_tensor).detach().max(1)[0].item()
+            #self.k = self.k + 1
+            #if (self.k == self.k_bound):
+            #    self.delta = (cur_maxqval - self.prev_maxqval) * self.f
+            #    if (self.delta > 0):
+            #        eps = (1.0 / (1.0 + np.exp(-2 * self.delta))) - 0.5
+            #    else:
+            #        if (self.delta < 0):
+            #            eps = 0.5
+            #    self.prev_maxqval = cur_maxqval
+            #    self.k = 0
+
             action = random.randrange(0,self.action_size)
-            self.action_flag = 0
+            #self.action_flag = 0
             #if (action == 1):
             #    for i in range(self.max_limit):
             #        action = random.randrange(0, self.action_size)
@@ -170,8 +188,8 @@ class Agent():
             target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
 
 
-experience =namedtuple("experience", field_names=["state", "action", "reward", "next_state", "next_action", "done"])
-class ReplayBuffer:
+dqn_experience =namedtuple("experience", field_names=["state", "action", "reward", "next_state", "done"])
+class DQN_ReplayBuffer:
     """
     Fixed-size buffer to store experience tuples
 
@@ -196,25 +214,25 @@ class ReplayBuffer:
         self.seed =random.seed(seed)
         self.device = device
 
-    def add(self, state, action, reward, next_state, next_action, done):
-        #e = self.experience(state, action, reward, next_state, done)
-        e = experience(state, action, reward, next_state, next_action, done)
+    def add(self, state, action, reward, next_state, done):
+        e = dqn_experience(state, action, reward, next_state, done)
+        #e = dqn_experience(state, action, reward)
         self.memory.append(e)
 
     def sample(self):
         """Randomly sample a batch of experience from memory"""
-        experiences = random.sample(self.memory, k=self.batch_size)
-
+        #experiences = random.sample(self.memory, k=self.batch_size)
+        experiences = self.memory
         experiences = [e for e in experiences if e is not None]
         #Convert batch of experiences to experiences of batches
         #batch = self.experience(*zip(*experiences))
-        batch = experience(*zip(*experiences))
+        batch = dqn_experience(*zip(*experiences))
         #print(batch.reward)
         states = torch.cat(batch.state).to(self.device)
         actions = torch.cat(batch.action).to(self.device)
         rewards = torch.cat(batch.reward).to(self.device)
         next_states = torch.cat(batch.next_state).to(self.device)
-        next_actions = torch.cat(batch.next_action).to(self.device)
+        #next_actions = torch.cat(batch.next_action).to(self.device)
         dones = torch.cat(batch.done).to(self.device)
         #states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(self.device)
         #actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).long().to(self.device)
@@ -222,7 +240,73 @@ class ReplayBuffer:
         #next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(self.device)
         #dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(self.device)
 
-        return (states, actions, rewards, next_states, next_actions, dones)
+        return (states, actions, rewards, next_states, dones)
+
+    def can_provide_sample(self):
+        return len(self.memory) >= self.batch_size
+
+    def __len__(self):
+        "Return the current size of replay memory"
+        return len(self.memory)
+
+    def save(self, filename):
+        with open(filename, 'wb') as f:
+            torch.save(self.memory, f)
+
+
+revdqn_experience =namedtuple("experience", field_names=["state", "action", "reward"])
+class revDQN_ReplayBuffer:
+    """
+    Fixed-size buffer to store experience tuples
+
+    Note:
+        This finite buffer size adds noise to the outputs on function approx.
+        larger the buffer size, more is the experience and less the number of episodes needed for training
+    """
+
+    def __init__(self, action_size, buffer_size, batch_size, seed, device):
+        """
+        Initialize a ReplayBuffer object
+        :param action_size (int): dimension of each action
+        :param buffer_size (int): maximum size of the buffer
+        :param batch_size (int): size of each training batch
+        :param seed (int): random seed
+        """
+
+        self.action_size = action_size
+        self.memory = deque(maxlen=buffer_size)
+        self.batch_size = batch_size
+        #self.experience =namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
+        self.seed =random.seed(seed)
+        self.device = device
+
+    def add(self, state, action, reward):
+        #e = self.experience(state, action, reward, next_state, done)
+        e = revdqn_experience(state, action, reward)
+        self.memory.append(e)
+
+    def sample(self):
+        """Randomly sample a batch of experience from memory"""
+        #experiences = random.sample(self.memory, k=self.batch_size)
+        experiences = self.memory
+        experiences = [e for e in experiences if e is not None]
+        #Convert batch of experiences to experiences of batches
+        #batch = self.experience(*zip(*experiences))
+        batch = revdqn_experience(*zip(*experiences))
+        #print(batch.reward)
+        states = torch.cat(batch.state).to(self.device)
+        actions = torch.cat(batch.action).to(self.device)
+        rewards = torch.cat(batch.reward).to(self.device)
+        #next_states = torch.cat(batch.next_state).to(self.device)
+        #next_actions = torch.cat(batch.next_action).to(self.device)
+        #dones = torch.cat(batch.done).to(self.device)
+        #states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(self.device)
+        #actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).long().to(self.device)
+        #rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(self.device)
+        #next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(self.device)
+        #dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(self.device)
+
+        return (states, actions, rewards)
 
     def can_provide_sample(self):
         return len(self.memory) >= self.batch_size
@@ -238,14 +322,27 @@ class ReplayBuffer:
 
 
 class EpsilonGreedyStrategy():
-    def __init__(self, start, end, decay, total_tsteps):
+    def __init__(self, start, end, decay, num_locs, total_tsteps):
         self.start = start
         self.end = end
         self.decay = decay
         self.scheduled_timesteps = total_tsteps
+        self.num_locs = num_locs
 
+    #def get_exploration_rate(self, current_step):
+        #return self.end + (self.start - self.end)*math.exp(-1. * current_step* self.decay)
+        #decay = min(float(current_step)/self.scheduled_timesteps, 1.0)
+        #return self.start + 1.2*decay*(self.end - self.start)
+    #    return max(self.end, (self.start)*((self.decay)**current_step))
     def get_exploration_rate(self, current_step):
         #return self.end + (self.start - self.end)*math.exp(-1. * current_step* self.decay)
-        decay = min(float(current_step)/self.scheduled_timesteps, 1.0)
-        return self.start + decay*(self.end - self.start)
+        #decay = min(float(current_step)/self.scheduled_timesteps, 1.0)
+        #return self.start + decay*(self.end - self.start)
+        if (current_step <= self.num_locs):
+            decay =1.0
+        elif(current_step <= self.scheduled_timesteps) and (current_step > self.num_locs):
+            decay = (self.decay)**(current_step-self.num_locs)
+        else:
+            decay = self.end
+        return max(self.end, (self.start) * decay)
         #return max(self.end, (self.start)*((self.decay)**current_step))
