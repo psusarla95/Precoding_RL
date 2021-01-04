@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 is_ipython = 'inline' in matplotlib.get_backend()
 if is_ipython: from IPython import display
 from Source.antenna import ula
+from Source.antenna import upa
 from Source.misc_fun.channel_mmW import Channel
 from Source.misc_fun.conversion import db2lin
 
@@ -60,7 +61,7 @@ def plot(values, moving_avg_period, test_values):
     print("Episode", len(values), "\t", moving_avg_period, "episode moving avg:", moving_avg[-1], end="\r")
     #if is_ipython: display.clear_output(wait=True)
 
-
+'''
 def get_moving_average(period, values):
     values = torch.tensor(values, dtype=torch.float)
     if len(values) >= period:
@@ -69,6 +70,28 @@ def get_moving_average(period, values):
         return moving_avg.numpy()
     else:
         moving_avg = torch.zeros(len(values))#torch.tensor([-4.0 for i in range(len(values))])#torch.zeros(len(values))
+        return moving_avg.numpy()
+        #val_cumsum = torch.cumsum(torch.from_numpy(np.array(values)), dim=0)
+        #val_denom = torch.from_numpy(np.arange(1,len(values)+1))
+        #moving_avg = val_cumsum/val_denom
+        #return moving_avg.numpy()
+'''
+
+def get_moving_average(period, values):
+    values = torch.tensor(values, dtype=torch.float)
+    if len(values) >= period:
+        # for value_indices < period
+        val_cumsum = torch.cumsum(torch.from_numpy(np.array(values[:(period-1)])), dim=0)
+        val_denom = torch.from_numpy(np.arange(1, len(values[:(period-1)]) + 1))
+        lowperiod_tensor = val_cumsum/val_denom
+
+        moving_avg = values.unfold(dimension=0, size=period, step=1).mean(dim=1).flatten(start_dim=0)
+        moving_avg = torch.cat((lowperiod_tensor, moving_avg))#torch.tensor([-4.0 for i in range(period-1)])
+        return moving_avg.numpy()
+    else:
+        val_cumsum = torch.cumsum(torch.from_numpy(np.array(values)), dim=0)
+        val_denom = torch.from_numpy(np.arange(1,len(values)+1))
+        moving_avg = val_cumsum/val_denom
         return moving_avg.numpy()
 
 
@@ -87,6 +110,71 @@ def plotbeam(ang, n):
     #ax.plot(theta, gr)
     #plt.show()
     return theta, gr
+
+def upa_plotbeam(ang1, ang2, n_x, n_y):
+    w = upa.steervec(n_x, n_y, ang1, ang2)#np.array(array_factor(d,ang, n))
+    #print(w.shape)
+    wh = w.T.conj()
+    r = np.arange(0, 1, 0.001)
+    theta = 2* np.pi * r
+
+    r2 = np.arange(0, 1, 0.001)
+    phi = 2 * np.pi * r2
+
+    #wh= wh.reshape(,)
+    #print(wh, w)
+    gr = np.abs(np.array([wh.dot(upa.steervec(n_x, n_y, x, y)) for x,y in zip(theta,phi)]))#ula.steervec(n, x, 0)
+
+    #theta, phi = np.linspace(0, 2 * np.pi, 40), np.linspace(0, np.pi, 40)
+    THETA, PHI = np.meshgrid(theta, phi)
+    #R = np.cos(PHI ** 2)
+    X = gr * np.cos(PHI) * np.cos(THETA)
+    Y = gr * np.sin(PHI) * np.cos(THETA)
+    Z = gr * np.sin(THETA)
+    #
+
+    #print("gr:{0}".format(gr))
+    #ax = plt.subplot(111, projection='polar')
+    ##print(theta.shape, gr.shape)
+    #ax.plot(theta, gr)
+    #plt.show()
+    return X,Y,Z
+
+def upa_varplotbeam(beam_val1, beam_val2, n_x, n_y):
+    ang1, active_nx = beam_val1
+    ang2, active_ny = beam_val2
+
+    w = upa.var_steervec(n_x, n_y, beam_val1, beam_val2)#np.array(array_factor(d,ang, n))
+    #print(w.shape)
+    wh = w.T.conj()
+    r = np.arange(0, 1, 0.01)
+    theta = 2* np.pi * r
+
+#    r2 = np.arange(0, 1, 0.01)
+    phi = 2 * np.pi * r
+
+    #wh= wh.reshape(,)
+    #print(wh, w)
+
+
+    #theta, phi = np.linspace(0, 2 * np.pi, 40), np.linspace(0, np.pi, 40)
+    THETA, PHI = np.meshgrid(theta, phi)
+    gr = np.abs(np.array([wh.dot(upa.var_steervec(n_x, n_y, (x, active_nx), (y, active_ny))) for x,y in zip(THETA.flatten(), PHI.flatten())]))  # ula.steervec(n, x, 0)
+    #print(THETA.shape)
+    #print(PHI.shape)
+    gr = gr.reshape(THETA.shape)
+    #R = np.cos(PHI ** 2)
+    X = gr * np.sin(PHI) * np.cos(THETA)#gr * np.cos(PHI) * np.cos(THETA)
+    Y = gr * np.sin(PHI) * np.sin(THETA)#gr * np.sin(PHI) * np.cos(THETA)
+    Z = gr*np.cos(PHI)#gr * np.sin(THETA)
+    #
+
+    #print("gr:{0}".format(gr))
+    #ax = plt.subplot(111, projection='polar')
+    ##print(theta.shape, gr.shape)
+    #ax.plot(theta, gr)
+    #plt.show()
+    return X,Y,Z
 
 def var_plotbeam(beam_val, n):
     ang, active_n = beam_val
@@ -153,6 +241,21 @@ def Generate_Beams(N,width_vec):
     dt = np.dtype('float,int')
     return np.array(BeamSet, dtype=dt)
 
+def Generate_UPABeams(N_x,N_y, width_vec):
+    BeamSet = []
+    min_ang = 0
+    max_ang = np.pi
+    #print("width_vec: ", width_vec)
+    for bm_wdth in width_vec:
+        beam_angles = np.arange(min_ang + bm_wdth, max_ang + bm_wdth, bm_wdth)
+        for i in range(len(beam_angles)):
+            nx_ant = min(int(np.pi/bm_wdth), N_x)
+            for j in range(len(beam_angles)):
+                ny_ant = min(int(np.pi/bm_wdth), N_y)
+                BeamSet.append((np.arctan2(np.sin(beam_angles[i]), np.cos(beam_angles[i])), nx_ant, np.arctan2(np.sin(beam_angles[j]), np.cos(beam_angles[j])), ny_ant)) #(beamdir, active_antennas)
+    dt = np.dtype('float,int,float,int')
+    return np.array(BeamSet, dtype=dt)
+
 def Generate_BeamDirs(N,refine_levels):
     BeamSet = []
     min_ang = 0
@@ -173,7 +276,8 @@ def Generate_BeamDirs(N,refine_levels):
                     BeamSet.append(radian_angle1)
                 if (radian_angle2 not in BeamSet):
                     BeamSet.append(radian_angle2)
-    return np.array(BeamSet)
+    #dt = np.dtype('float')
+    return np.array(BeamSet)#, dtype=dt)
 
 
 def All_Exhaustive_RateMeas(tx_locs, N_tx, N_rx):
