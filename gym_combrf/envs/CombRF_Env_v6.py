@@ -7,9 +7,11 @@ import random
 import math
 from Source.MIMO import MIMO
 from Source.misc_fun.channel_mmW import *
+from Source.antenna import ula, upa
+from Source.misc_fun.conversion import *
 from Source.misc_fun.geometry import *
 from Source.misc_fun.codebook import DFT_Codebook
-from Source.misc_fun.utils import Generate_BeamDir
+from Source.misc_fun.utils import Generate_BeamDir, Generate_UPABeams
 # This is the 3D plotting toolkit
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -81,9 +83,10 @@ class CombRF_Env_v6(gym.Env):
         self.rbdir_count = 0
         self.rwd_sum = 0
 
-        self.rx_stepsize = 100 #in m
-        self.rx_xcov = np.arange(-100, -1, self.rx_stepsize)#coverage along x axis
-        self.rx_ycov = np.arange(-100, -1, self.rx_stepsize) #coverage along y axis
+        self.rx_stepsize = 20  # in m
+        self.rx_xcov = np.array([-300, -100, 100,300])  # np.array([-700,100])#, 650, 100])#np.arange(-200, -1, self.rx_stepsize)#*np.cos(58*np.pi/180)coverage along x axis
+        self.rx_ycov = np.array([-300, -100, 100,300])  # np.arange(-200, -1, self.rx_stepsize)#np.array([300, 550])#, -400, 550])#np.arange(-200, -1, self.rx_stepsize) #coverage along y axis
+        self.rx_zcov = np.array([51.5, 71.5])  # np.arange(21.5,22.5, 10)
         self.tx_beam = None
 
         self.aoa_min = 0
@@ -94,16 +97,21 @@ class CombRF_Env_v6(gym.Env):
         self.goal_steps = 10  # cardinality of Beamset
         self.obs_space = spaces.MultiDiscrete([len(self.rx_xcov),  # ue_xloc
                                                len(self.rx_ycov),  # ue_yloc
-                                               self.N_tx, #tx_bdir
+                                               len(self.rx_zcov),
+                                               self.N_tx,  # tx_bdir
                                                ])
-        vec1, vec2 = self.get_rssi_range()
-        self.min_rssi, self.max_rssi = np.abs(vec1), np.abs(vec2)
+        #vec1, vec2 = self.get_rssi_range()
+        #self.min_rssi, self.max_rssi = np.abs(vec1), np.abs(vec2)
 
-        #this logic is mainly for exh search over fast fading channel
+        # this logic is mainly for exh search over fast fading channel
         self.tx_locs = []
         for xloc in self.rx_xcov:
             for yloc in self.rx_ycov:
-                self.tx_locs.append(np.array([[xloc, yloc, 0]]))
+                for zloc in self.rx_zcov:
+                    if (xloc == 0) and (yloc == 0):
+                        self.tx_locs.append(np.array([[50, 50, zloc]]))
+                    else:
+                        self.tx_locs.append(np.array([[xloc, yloc, zloc]]))
 
         self.dqnloc_maxexhrates = [0 for i in range(self.action_space.n * len(self.tx_locs))]
         self.dqnloc_maxexhselections = [0 for i in range(self.action_space.n * len(self.tx_locs))]
@@ -160,15 +168,16 @@ class CombRF_Env_v6(gym.Env):
     def reset(self, ch_randval):
         #select random TX loc from RX coverage area
         #self.tx_loc = np.array([[random.choice(self.rx_xcov), random.choice(self.rx_ycov), 0]])
-        tx_loc_xndx, tx_loc_yndx, tx_dir_ndx =self.obs_space.sample()
-        self.tx_loc = np.array([[self.rx_xcov[tx_loc_xndx],self.rx_ycov[tx_loc_yndx], 0]])
+        tx_loc_xndx, tx_loc_yndx, tx_loc_zndx, tx_dir_ndx = self.obs_space.sample()
+        self.tx_loc = np.array([[self.rx_xcov[tx_loc_xndx],self.rx_ycov[tx_loc_yndx], self.rx_zcov[tx_loc_zndx]]])
 
         # update the counter for (TXloc,TXdir) visit
         loc_ndx = self.get_txloc_ndx(self.tx_loc)
         self.dqnloc_maxexhselections[(loc_ndx) * self.action_space.n + tx_dir_ndx] += 1
+        #self.tx_loc = self.tx_locs[tx_num]
+        if (self.tx_loc[0][0] == 0) and (self.tx_loc[0][1] == 0):
+            self.tx_loc = np.array([[50, 50, self.tx_loc[0][3]]])
 
-        if(np.all(self.tx_loc == [0,0,0])):
-            self.tx_loc = np.array([[40,40,0]])
 
         self.channel = Channel(self.freq, self.tx_loc, self.rx_loc, self.sc_xyz, 'model', self.ch_model, 'nrx', self.N_rx,
                                'ntx', self.N_tx, 'nFFT', self.nFFT, 'df', self.df)

@@ -55,7 +55,32 @@ register(
     entry_point='gym_combrf.envs:CombRF_Env_v10',
 )
 
+#register(
+#    id='combrf-v11',
+#    entry_point='gym_combrf.envs:CombRF_Env_v7_270820',
+#)
+
 register(
-    id='combrf-v11',
-    entry_point='gym_combrf.envs:CombRF_Env_v7_270820',
+    id='combrf-v12',
+    entry_point='gym_combrf.envs:CombRF_Env_v12',
+)
+
+register(
+    id='combrf-v13',
+    entry_point='gym_combrf.envs:CombRF_Env_gcab',
+)
+
+register(
+    id='combrf-v14',
+    entry_point='gym_combrf.envs:CombRF_Env_v14',
+)
+
+register(
+    id='combrf-v15',
+    entry_point='gym_combrf.envs:CombRF_Env_v15',
+)
+
+register(
+    id='rfsense-v0',
+    entry_point='gym_combrf.envs:RFSense_Env_v0',
 )

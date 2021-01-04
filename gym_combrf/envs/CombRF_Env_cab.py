@@ -6,10 +6,12 @@ import numpy as np
 import random
 import math
 from Source.MIMO import MIMO
-from Source.misc_fun.channel_mmW import *
+from Source.antenna import ula, upa
+from Source.misc_fun import channel_mmW, upa_channel_mmW
 from Source.misc_fun.geometry import *
+from Source.misc_fun.conversion import *
 from Source.misc_fun.codebook import DFT_Codebook
-from Source.misc_fun.utils import Generate_BeamDir
+from Source.misc_fun.utils import Generate_Beams, Generate_UPABeams,Generate_BeamDirs,Generate_BeamDir
 # This is the 3D plotting toolkit
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -51,22 +53,32 @@ Model Characteristics:
 
 class CombRF_Env_cab(gym.Env):
     def __init__(self):
-        self.N_tx = 8 #number of TX antennas
-        self.N_rx = 8 #number of RX antennas
+        self.Ntx_y = 8  # tx antennas along y-direction
+        self.Ntx_z = 1  # tx antennas along z-direction
+        self.Nrx_y = 8  # rx antennas along y-direction
+        self.Nrx_z = 1  # rx antennas along z-direction
+
+        self.N_tx = self.Ntx_y * self.Ntx_z  # number of TX antennas
+        self.N_rx = self.Nrx_y * self.Nrx_z  # number of RX antennas
         self.P_tx = 0 #Power in dB
+        self.ant_arr = 'ula'
         #self.SF_time =20 #msec - for 60 KHz carrier frequency in 5G
         #self.alpha = 0 #angle of rotation of antenna w.r.t y-axis
 
-        self.rx_loc = np.array([[0,0,0]]) #RX is at origin
+        self.rx_loc = np.array([[0,0,25]]) #RX is at origin
         self.tx_loc = None
         self.freq = 30e9
+        self.c = 3e8  # speed of light
         self.df = 60 * 1e3  # 75e3  # carrier spacing frequency
         self.nFFT = 1  # 2048  # no. of subspace carriers
         self.T_sym = 1 / self.df
         self.B = self.nFFT * self.df
-        self.sc_xyz = np.array([])#np.array([[0,100,0], [10,50,0], [40,60,0], [70,80,0], [100,50,0], [80,85,0], [20,30,0], [10,40,0], [80,20,0]])#np.array([[0,100,0]])#np.array([[0,100,0],[250,0,0],[-200,-150,0]]) #reflection points for now
-        #self.obs_xyz = np.array([[150,0,0], [150, 150*np.tan(np.pi/16),0], [150, -150*np.tan(np.pi/16),0]])
-        self.ch_model ='uma-los' #free-space path loss model
+        self.sc_xyz = np.array([[0,20,21.5], [20,0,21.5],[-20,0,21.5],[0,-20,21.5]])#np.array([[650, 300, 61.5], [0, -550, 41.5]])  # np.array([[-100,50,21.5], [-100,-50,21.5], [-50,100,21.5],[50,100,21.5]])#np.array([[-100,50,11.5], [-100,-50,11.5], [-50,100,11.5],[50,100,11.5]])#np.array([[50,0,0], [-50,-100,0], [100,50,0],[50,-100,0]])#np.array([[0,100,0], [10,50,0], [40,60,0], [70,80,0], [100,50,0], [80,85,0], [20,30,0], [10,40,0], [80,20,0]])#np.array([[0,100,0]])#np.array([[0,100,0],[250,0,0],[-200,-150,0]]) #reflection points for now
+        # self.obs_xyz = np.array([[150,0,0], [150, 150*np.tan(np.pi/16),0], [150, -150*np.tan(np.pi/16),0]])
+        self.ch_model = 'uma-los'  # 'uma-nlos' #free-space path loss model
+        self.init_ch_model = 'uma-los'
+        self.ant_arr = 'ula'
+
         self.N = self.N_rx #Number of receiver codebook directions
 
         # noise
@@ -83,24 +95,43 @@ class CombRF_Env_cab(gym.Env):
         self.rbdir_count = 0
         self.rwd_sum = 0
 
-        self.rx_stepsize = 100 #in m
-        self.rx_xcov = np.arange(-100, -1, self.rx_stepsize)#coverage along x axis
-        self.rx_ycov = np.arange(-100, -1, self.rx_stepsize) #coverage along y axis
+        self.rx_stepsize = 20  # in m
+        self.rx_xcov = np.array([-20])  # np.array([-700,100])#, 650, 100])#np.arange(-200, -1, self.rx_stepsize)#*np.cos(58*np.pi/180)coverage along x axis
+        self.rx_ycov = np.array([-20])  # np.arange(-200, -1, self.rx_stepsize)#np.array([300, 550])#, -400, 550])#np.arange(-200, -1, self.rx_stepsize) #coverage along y axis
+        self.rx_zcov = np.array([41.5])  # np.arange(21.5,22.5, 10)
         self.tx_beam = None
 
         self.aoa_min = 0
         self.aoa_max= 2*math.pi
-        self.action_space = spaces.Discrete(self.N_rx)
+        self.beamwidth_vec = np.array([np.pi / self.N_rx])
+        self.beam_param = 'beam-narrow'
         self.action = None
-        self.BeamSet = Generate_BeamDir(self.N_tx)  # Set of all beam directions
+        if (self.ant_arr == 'ula') and (self.beam_param == 'beam-refine'):
+            #self.beamrefine_levels = param_values
+            self.BeamSet = Generate_BeamDirs(self.N_rx, self.beamrefine_levels)
+        elif (self.ant_arr == 'ula') and (self.beam_param == 'beam-width'):
+            #self.beamwidth_vec = param_values
+            self.BeamSet = Generate_Beams(self.N_rx, self.beamwidth_vec)
+        elif (self.ant_arr == 'ula') and (self.beam_param == 'beam-narrow'):
+            self.BeamSet = Generate_BeamDir(self.N_rx)
+        else:
+            self.BeamSet = Generate_UPABeams(self.N_rx, self.N_rx, np.array([np.pi / self.N_rx]))
+
         self.episode_time = 10  # Fading length considered
-        self.obs_space = spaces.MultiDiscrete([
-                                                len(self.rx_xcov),  # ue_xloc
-                                                len(self.rx_ycov),  # ue_yloc
+        self.obs_space = spaces.MultiDiscrete([len(self.rx_xcov),  # ue_xloc
+                                               len(self.rx_ycov),  # ue_yloc
+                                               len(self.rx_zcov),
                                                ])
-        #vec1, vec2 = self.get_rssi_range()
-        #self.min_rssi, self.max_rssi = np.abs(vec1), np.abs(vec2)
-        #self.Q = self.init_Qval()
+        self.action_space = spaces.Discrete(self.N_tx * len(self.BeamSet))
+        # this logic is mainly for exh search over fast fading channel
+        self.tx_locs = []
+        for xloc in self.rx_xcov:
+            for yloc in self.rx_ycov:
+                for zloc in self.rx_zcov:
+                    if (xloc == 0) and (yloc == 0):
+                        self.tx_locs.append(np.array([[50, 50, zloc]]))
+                    else:
+                        self.tx_locs.append(np.array([[xloc, yloc, zloc]]))
 
 
     def seed(self, seed=0):
@@ -110,151 +141,107 @@ class CombRF_Env_cab(gym.Env):
     def step(self, action, ch_randval=None):
         assert self.action_space.contains(action), "%r (%s) invalid" % (action, type(action))
 
-        if (ch_randval is not None):
-            self.channel.generate_paths(ch_randval)
-            self.npaths = self.channel.nlos_path + 1
-            self.h = self.channel.get_h()  # channel coefficient
-            self.tx_beam = ula.steervec(self.N_tx, self.tx_bdir, 0)
-            self.eff_ch = np.array(self.h[:, :, 0]).dot(self.tx_beam)
-        # tx_dir_ndx, rx_dir_ndx = int(action / self.N_tx), int(action % self.N_rx)
-        wRF = ula.steervec(self.N_rx, self.BeamSet[action],0)  # self.codebook[:,action[0]]#ula.steervec(self.N_rx, action[0], 0)
+        tx_dir_ndx, rx_dir_ndx = int(action / self.N_rx), int(action % self.N_rx)
+        self.txdir_ndx = tx_dir_ndx
+        self.rbdir_ndx = rx_dir_ndx
+        self.tx_bdir = self.BeamSet[tx_dir_ndx]  # self.channel.az_aod[0]#
+        self.rx_bdir = self.BeamSet[rx_dir_ndx]
+
+        self.h = self.channel.get_h()  # channel coefficient
+        if (self.ant_arr == 'ula'):
+            if (self.beam_param == 'beam-width'):
+                self.tx_beam = ula.var_steervec(self.N_tx, self.tx_bdir, 0)
+            else:
+                self.tx_beam = ula.steervec(self.N_tx, self.tx_bdir, 0)
+        if (self.ant_arr == 'upa'):
+            self.tx_beam = upa.var_steervec(self.Ntx_x, self.Ntx_y, self.tx_bdir)
+
+        self.eff_ch = np.array(self.h[:, :, 0]).dot(self.tx_beam)
+
+        if (self.ant_arr == 'ula'):
+            if (self.beam_param == 'beam-width'):
+                wRF = ula.var_steervec(self.N_rx, self.rx_bdir,0)  # self.codebook[:,action[0]]#ula.steervec(self.N_rx, action[0], 0)
+            else:
+                wRF = ula.steervec(self.N_rx, self.rx_bdir,0)  # self.codebook[:,action[0]]#ula.steervec(self.N_rx, action[0], 0)
+        if self.ant_arr == 'upa':
+            wRF = upa.var_steervec(self.N_rx, self.N_rx, self.rx_bdir)
+
         # fRF = ula.steervec(self.N_tx, self.BeamSet[tx_dir_ndx], 0)
         # self.rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.h[:, :, 0])).dot(fRF) #+ (np.conj(wRF.T).dot(self.noise))[0]
         # self.rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.eff_ch)) #+ (np.conj(wRF.T).dot(self.noise))[0]
         self.rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.eff_ch))
-
-        # compute reward based on previous rssi value
-        rwd, done = self.get_reward_goal(self.rssi_val)
-        self.rwd_sum = self.rwd_sum + rwd
-
-        #self.rx_bdir = self.BeamSet[action]
-
-        # self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]),
-        #                                     self.eff_ch.real.ravel(), self.eff_ch.imag.ravel()), axis=0)])
-        # self.obs = np.array([[self.rssi_val.real, self.rssi_val.imag]])#, self.tx_bdir]])
-        # self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]),
-        #                                    self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        # self.obs = np.array([np.concatenate((np.array([np.abs(self.rssi_val)]), \
-        #                                     self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        #self.norm_rssi = np.array([(np.abs(self.rssi_val) - self.min_rssi) / (self.max_rssi - self.min_rssi)])
-        #self.norm_rx_ndx = np.array([action / self.N_rx])
-        # self.obs = np.array([np.concatenate((self.norm_rssi, self.norm_tx_ndx), axis=0)])
-        # self.obs = np.array([self.norm_rssi])
-        #self.obs = np.array([np.concatenate((self.norm_rssi, self.norm_tx_ndx, self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        #self.obs = np.array(
-        #    [np.concatenate((self.norm_rx_ndx, self.norm_tx_ndx, self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        # self.obs = np.array([np.concatenate((np.array([self.tx_bdir/np.pi]), self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        # self.obs = np.array([np.concatenate((self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
         self.rbdir_count = self.rbdir_count + 1
-        return rwd, done
+        Es = db2lin(self.P_tx)  # * (1e-3 / self.B)
+        self.SNR = Es * np.abs(self.rssi_val) ** 2 / (self.N0 * self.B)
+        self.rate = np.log2(1 + self.SNR)
+        self.ep_rates.append(self.rate)
+        self.ep_rssi.append(self.rssi_val)
 
-    def reset(self, tx_loc, tx_dir_ndx, ch_randval):
+
+        # assign the reward 1.0 for selected action
+        #rwd = self.get_reward(self.rssi_val)
+        #done = self._gameover()
+
+        return #rwd, done
+
+    def reset(self, loc_ndx, ch_randval):
         #select random TX loc from RX coverage area
         #self.tx_loc = np.array([[random.choice(self.rx_xcov), random.choice(self.rx_ycov), 0]])
         #tx_loc_xndx, tx_loc_yndx, tx_dir_ndx =self.obs_space.sample()
-        rx_dir_ndx = self.action_space.sample()
+        #rx_dir_ndx = self.action_space.sample()
         #tx_dir_ndx, rx_dir_ndx = int(temp / self.N_tx), int(temp % self.N_rx)
-        self.tx_loc = tx_loc#np.array([[self.rx_xcov[tx_loc_xndx],self.rx_ycov[tx_loc_yndx], 0]])
+        self.tx_loc = self.tx_locs[loc_ndx]#np.array([[self.rx_xcov[tx_loc_xndx],self.rx_ycov[tx_loc_yndx], 0]])
 
-        if(np.all(self.tx_loc == [0,0,0])):
-            self.tx_loc = np.array([[40,40,0]])
+        if (self.tx_loc[0][0]==0) and (self.tx_loc[0][1]==0):
+            self.tx_loc = np.array([[50,50,self.tx_loc[0][2]]])
 
-        self.channel = Channel(self.freq, self.tx_loc, self.rx_loc, self.sc_xyz, 'model', self.ch_model, 'nrx', self.N_rx,
-                               'ntx', self.N_tx, 'nFFT', self.nFFT, 'df', self.df)
+        #self.dbp = 4 * self.tx_loc[0, 2] * self.rx_loc[0, 2] * self.freq / self.c
+        #self.d_2d = np.linalg.norm(np.array([[self.tx_loc[0, 0], self.tx_loc[0, 1], 0]]) - np.array(
+        #    [[self.rx_loc[0, 0], self.rx_loc[0, 1], 0]]))
 
-        self.channel.generate_paths(ch_randval)
-        self.npaths = self.channel.nlos_path + 1
-        self.h = self.channel.get_h() #channel coefficient
+        #if (self.dbp <= self.d_2d <= 5e3) and (self.ch_model == 'uma-los'):
+        #    self.ch_model = self.init_ch_model + '-dbp'
+        #else:
+        #    self.ch_model = self.init_ch_model
 
+        if self.ant_arr == 'ula':
+            self.channel = channel_mmW.Channel(self.freq, self.tx_loc, self.rx_loc, self.sc_xyz, 'model', self.init_ch_model, 'nrx', self.N_rx,
+                                   'ntx', self.N_tx, 'nFFT', self.nFFT, 'df', self.df)
+            self.channel.generate_paths(ch_randval, loc_ndx)
+            self.npaths = self.channel.nlos_path + 1
+            self.h = self.channel.get_h()  # channel coefficient
+            #self.tx_bdir = self.BeamSet[tx_dir_ndx]  # self.channel.az_aod[0]#
+            #self.tx_beam = ula.var_steervec(self.N_tx, self.BeamSet[tx_dir_ndx], 0)
+
+        if self.ant_arr == 'upa':
+            self.channel = upa_channel_mmW.Channel(self.freq, self.tx_loc, self.rx_loc, self.sc_xyz, 'model', self.ch_model, 'nrx_y', self.Nrx_y, 'nrx_z', self.Nrx_z,'ntx_y', self.Ntx_y, 'ntx_y', self.Ntx_z, 'nFFT', self.nFFT, 'df', self.df)
+            self.channel.generate_paths(ch_randval, loc_ndx)
+            self.npaths = self.channel.nlos_path + 1
+            self.h = self.channel.get_h() #channel coefficient
+            #self.tx_bdir = self.BeamSet[tx_dir_ndx]  # self.channel.az_aod[0]#
+            #self.tx_beam = upa.var_steervec(self.Ntx_y, self.Ntx_z, self.BeamSet[tx_dir_ndx])
         #project TX in the transmitter direction
         #self.tx_beam = ula.steervec(self.N_tx, self.channel.az_aod[0], self.channel.el_aod[0])
-        self.tx_bdir = self.BeamSet[tx_dir_ndx]#self.channel.az_aod[0]#
-        self.tx_beam = ula.steervec(self.N_tx, self.BeamSet[tx_dir_ndx], 0)
+
 
         #rbdir_ndx = self.action_space.sample() #select a random receive direction
-        self.rx_bdir = self.BeamSet[rx_dir_ndx]
-        wRF = ula.steervec(self.N_rx, self.rx_bdir , 0)
+        #self.rx_bdir = self.BeamSet[rx_dir_ndx]
+        #if self.ant_arr == 'ula':
+        #    wRF = ula.steervec(self.N_rx, self.rx_bdir,0)  # self.codebook[:,action[0]]#ula.steervec(self.N_rx, action[0], 0)
+        #if self.ant_arr == 'upa':
+        #    wRF = upa.var_steervec(self.N_rx, self.N_rx, self.rx_bdir)
+        #wRF = ula.steervec(self.N_rx, self.rx_bdir , 0)
 
-        self.eff_ch = np.array(self.h[:, :, 0]).dot(self.tx_beam)
-        self.rssi_val = np.sqrt(self.N_rx*self.N_tx)*np.array(np.conj(wRF.T).dot(self.eff_ch)) #+ (np.conj(wRF.T).dot(self.noise))[0]
+        #self.eff_ch = np.array(self.h[:, :, 0]).dot(self.tx_beam)
+        self.rbdir_count = 0
 
-        Es = db2lin(self.P_tx)  # * (1e-3 / self.B)
-        SNR = Es * np.abs(self.rssi_val) ** 2 / (self.N0 * self.B)
-        self.rate = np.log2(1 + SNR)  # in Gbit/s (self.B / self.nFFT) *
-        self.best_rate = self.rate
-
-        # state should be a factor of affective channel at transmitter + current RSSI value between TX and RX
-        # A random state - comes from random fixed TX location, random TX beam from its codebook, random RX beam from its codebook
-        # self.obs = np.array([[self.rssi_val.real, self.rssi_val.imag]])
-        # self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]),
-        #                                     self.eff_ch.real.ravel(), self.eff_ch.imag.ravel()), axis=0)])
-        #self.norm_tx_xloc = np.array([(self.tx_loc[0][0]) / 1000])  # np.max(self.rx_xcov)])#np.array([(self.tx_loc[0][0]+np.max(self.rx_xcov))/(np.max(self.rx_xcov))])#-np.min(self.rx_xcov))])
-        #self.norm_tx_yloc = np.array([(self.tx_loc[0][1]) / 1000])  # max(np.max(self.rx_ycov),1)])#np.array([(self.tx_loc[0][1] + np.max(self.rx_ycov)) / (np.max(self.rx_ycov))])# - np.min(self.rx_ycov))])
-        # self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]), \
-        #                                    self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        #self.norm_rssi = np.array([(np.abs(self.rssi_val) - self.min_rssi) / (self.max_rssi - self.min_rssi)])
-        #self.norm_tx_ndx = np.array([tx_dir_ndx / self.N_tx])
-        #self.norm_rx_ndx = np.array([rbdir_ndx/self.N_rx])
-        # self.obs = np.array([np.concatenate((self.norm_rssi, self.norm_tx_ndx), axis=0)])
-        # self.obs = np.array([self.norm_rssi])
-        #self.obs = np.array([np.concatenate((self.norm_rssi, self.norm_tx_ndx, self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        #self.obs = np.array(
-        #    [np.concatenate((self.norm_rx_ndx, self.norm_tx_ndx, self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        # self.obs = np.array([np.concatenate((np.array([np.abs(self.rssi_val)]), \
-        #                                     self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        # self.obs = np.array([np.concatenate((np.array([self.tx_bdir/np.pi]), self.norm_tx_xloc, self.norm_tx_yloc),axis=0)])
-        # self.obs = np.array([np.concatenate((self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        self.rbdir_count = 1
-        return rx_dir_ndx
-
-    def test_reset(self, tx_loc, tbdir_ndx, sc):
-        self.tx_loc = tx_loc
-        tx_dir_ndx = tbdir_ndx
-
-        self.channel = Channel(self.freq, self.tx_loc, self.rx_loc, sc, 'model', self.ch_model, 'nrx', self.N_rx,
-                               'ntx', self.N_tx, 'nFFT', self.nFFT, 'df', self.df)
-
-        self.channel.generate_paths()
-        self.npaths = self.channel.nlos_path + 1
-        self.h = self.channel.get_h() #channel coefficient
-
-        #project TX in the transmitter direction
-        #self.tx_beam = ula.steervec(self.N_tx, self.channel.az_aod[0], self.channel.el_aod[0])
-        self.tx_bdir = self.BeamSet[tx_dir_ndx]#self.channel.az_aod[0]#
-        self.tx_beam = ula.steervec(self.N_tx, self.BeamSet[tx_dir_ndx], 0)
-
-        rbdir_ndx = self.action_space.sample() #select a random receive direction
-        self.rx_bdir = self.BeamSet[rbdir_ndx]
-        wRF = ula.steervec(self.N_rx, self.rx_bdir , 0)
-        self.eff_ch = np.array(self.h[:,:,0]).dot(self.tx_beam)
-        self.rssi_val = np.sqrt(self.N_rx*self.N_tx)*np.array(np.conj(wRF.T).dot(self.eff_ch)) #+ (np.conj(wRF.T).dot(self.noise))[0]
-
-        Es = db2lin(self.P_tx)  # * (1e-3 / self.B)
-        SNR = Es * np.abs(self.rssi_val) ** 2 / (self.N0 * self.B)
-        self.rate = np.log2(1 + SNR)  # in Gbit/s (self.B / self.nFFT) *
-        self.best_rate = self.rate
-
-        # self.obs = np.array([[self.rssi_val.real, self.rssi_val.imag]])
-        # self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]),
-        #                                     self.eff_ch.real.ravel(), self.eff_ch.imag.ravel()), axis=0)])
-        self.norm_tx_xloc = np.array([(self.tx_loc[0][0]) / 1000])  # np.max(self.rx_xcov)])#np.array([(self.tx_loc[0][0]+np.max(self.rx_xcov))/(np.max(self.rx_xcov))])#-np.min(self.rx_xcov))])
-        self.norm_tx_yloc = np.array([(self.tx_loc[0][1]) / 1000])  # max(np.max(self.rx_ycov),1)])#np.array([(self.tx_loc[0][1] + np.max(self.rx_ycov)) / (np.max(self.rx_ycov))])# - np.min(self.rx_ycov))])
-        # self.obs = np.array([np.concatenate((np.array([self.rssi_val.real]), np.array([self.rssi_val.imag]), \
-        #                                    self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        self.norm_rssi = np.array([(np.abs(self.rssi_val) - self.min_rssi) / (self.max_rssi - self.min_rssi)])
-        self.norm_tx_ndx = np.array([tx_dir_ndx / self.N_tx])
-        # self.obs = np.array([np.concatenate((self.norm_rssi, self.norm_tx_ndx), axis=0)])
-        # self.obs = np.array([self.norm_rssi])
-        #self.obs = np.array([np.concatenate((self.norm_rssi, self.norm_tx_ndx, self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        self.norm_rx_ndx = np.array([rbdir_ndx / self.N_rx])
-        self.obs = np.array(
-            [np.concatenate((self.norm_rx_ndx, self.norm_tx_ndx, self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        # self.obs = np.array([np.concatenate((np.array([np.abs(self.rssi_val)]), \
-        #                                     self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        # self.obs = np.array([np.concatenate((np.array([self.tx_bdir/np.pi]), self.norm_tx_xloc, self.norm_tx_yloc),axis=0)])
-        # self.obs = np.array([np.concatenate((self.norm_tx_xloc, self.norm_tx_yloc), axis=0)])
-        self.rbdir_count = 1
-        return self.obs
+        #rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(self.eff_ch))  # + (np.conj(wRF.T).dot(self.noise))[0]
+        #Es = db2lin(self.P_tx)  # * (1e-3 / self.B)
+        #SNR = Es * np.abs(rssi_val) ** 2 / (self.N0 * self.B)
+        #self.rate = np.log2(1 + SNR)
+        self.ep_rates = []
+        self.ep_rssi = []
+        return self.rbdir_count
 
     def render(self, mode='human', close=False):
         return
@@ -292,113 +279,73 @@ class CombRF_Env_cab(gym.Env):
 
         return rssi_values, rate_values
 
-    def get_rssi_range(self):
-        loc1 = np.array([[40,40,0]])
-        sc = np.array([])
-        ch_model = 'uma-los'
-
-        channel = Channel(self.freq, loc1, self.rx_loc, sc, 'model', ch_model, 'nrx', self.N_rx,
-                               'ntx', self.N_tx, 'nFFT', self.nFFT, 'df', self.df)
-
-        channel.generate_paths()
-        h = channel.get_h()
-
-        max_rssi = 0
-        for tx_dir_ndx in range(self.N_tx):
-            tx_dir = self.BeamSet[tx_dir_ndx]
-            tx_beam = ula.steervec(self.N_tx, tx_dir, 0)
-            eff_ch = np.array(h[:, :, 0]).dot(tx_beam)
-            for rx_dir_ndx in range(self.N_rx):
-                rx_dir = self.BeamSet[rx_dir_ndx]
-                wRF = ula.steervec(self.N_rx, rx_dir, 0)
-                rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(eff_ch))  # + (np.conj(wRF.T).dot(self.noise))[0]
-                if(np.abs(max_rssi)**2 < np.abs(rssi_val)**2):
-                    max_rssi = rssi_val
-
-        loc2 = np.array([[500, 500, 0]])
-        sc = np.array([])
-        ch_model = 'uma-los'
-
-        channel = Channel(self.freq, loc2, self.rx_loc, sc, 'model', ch_model, 'nrx', self.N_rx,
-                          'ntx', self.N_tx, 'nFFT', self.nFFT, 'df', self.df)
-
-        channel.generate_paths()
-        h = channel.get_h()
-
-        min_rssi = 1e20
-        for tx_dir_ndx in range(self.N_tx):
-            tx_dir = self.BeamSet[tx_dir_ndx]
-            tx_beam = ula.steervec(self.N_tx, tx_dir, 0)
-            eff_ch = np.array(h[:, :, 0]).dot(tx_beam)
-            for rx_dir_ndx in range(self.N_rx):
-                rx_dir = self.BeamSet[rx_dir_ndx]
-                wRF = ula.steervec(self.N_rx, rx_dir, 0)
-                rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(eff_ch))  # + (np.conj(wRF.T).dot(self.noise))[0]
-                if (np.abs(min_rssi) ** 2 > np.abs(rssi_val) ** 2):
-                    min_rssi = rssi_val
-
-        return min_rssi, max_rssi
-
-    def get_reward_goal(self, rssi_val):
-        #transmission energy
-        Es = db2lin(self.P_tx) #* (1e-3 / self.B)
-        SNR = Es * np.abs(rssi_val)**2 / (self.N0*self.B)
-        rate = np.log2(1 + SNR)  # in Gbit/s (self.B / self.nFFT) *
-        rwd = 0.0
-        done = False
-
-        #if (self.rbdir_count == self.goal_steps)or ((rate == self.rate) and self.rbdir_count >1):  # ((rate >= self.rate) and (self.rbdir_count ==2)) or
-        #    done = True
-        #if  (rate > self.best_rate):  #(rate > self.rate) and and (self.rbdir_count < 2)
-        #    rwd = 1.0#float(np.round(rate))#1.0  # float(np.round(rate))
-        #    self.best_rate = rate
-        #if (rate < self.rate) or ((rate > self.rate) and (rate < self.best_rate)): #and (rate < self.best_rate)
-        #    rwd = -1.0#*float(np.round(rate))#-1.0
-        #rwd = rate
-
-        if(rate > self.rate):
-            rwd = 1.0
-        if (self.rbdir_count == self.episode_time):
-            done = True
-
-        self.rate = rate        # print(rwd)
-        return rwd, done
-
     def get_rate(self):
         return self.rate
 
-    def get_minmax_exhrate(self, ch_randvals):
+    def get_minmax_exhrate(self, loc_ndx,ch_randval):
+        max_rate = 0.0
+        min_rate = 1e10
+        max_action_ndx = 0
+        min_action_ndx = 0
+        max_rssi_val = 0
+        min_rssi_val = 0
 
+        tx_loc = self.tx_locs[loc_ndx]
+        #self.dbp = 4 * tx_loc[0, 2] * self.rx_loc[0, 2] * self.freq / self.c
+        #self.d_2d = np.linalg.norm(np.array([[tx_loc[0, 0], tx_loc[0, 1], 0]]) - np.array(
+        #    [[self.rx_loc[0, 0], self.rx_loc[0, 1], 0]]))
 
-        channel = Channel(self.freq, self.tx_loc, self.rx_loc, self.sc_xyz, 'model', self.ch_model, 'nrx', self.N_rx,
-                               'ntx', self.N_tx, 'nFFT', self.nFFT, 'df', self.df)
+        #if (self.dbp <= self.d_2d <= 5e3) and (self.ch_model == 'uma-los'):
+        #   self.ch_model = self.init_ch_model + '-dbp'
+        #else:
+        #    self.ch_model = self.init_ch_model
 
-        avg_max_rate =0.0
-        avg_min_rate = 0.0
-        avg_max_rssival = 0
-        avg_min_rssival = 0
-        action_ndices = np.zeros((self.N_rx,1))
+        if self.ant_arr == 'ula':
+            channel = channel_mmW.Channel(self.freq, tx_loc, self.rx_loc, self.sc_xyz, 'model', self.init_ch_model,
+                                          'nrx', self.N_rx,
+                                          'ntx', self.N_tx, 'nFFT', self.nFFT, 'df', self.df)
+            channel.generate_paths(ch_randval, loc_ndx)
+            # snpaths = channel.nlos_path + 1
+            h = channel.get_h()  # channel coefficient
+            #tx_bdir = self.BeamSet[tx_dir_ndx]  # self.channel.az_aod[0]#
+            #tx_beam = ula.var_steervec(self.N_tx, tx_bdir, 0)
 
-        for ch_randval in ch_randvals:
-            max_rate = 0.0
-            min_rate = 1e10
-            max_action_ndx = 0
-            min_action_ndx = 0
-            max_rssi_val = 0
-            min_rssi_val = 0
-            channel.generate_paths(ch_randval)
-            npaths = self.channel.nlos_path + 1
-            h = self.channel.get_h()  # channel coefficient
-            eff_ch = np.array(h[:, :, 0]).dot(self.tx_beam)
-            #self.cap = self.get_capacity()  # Compute capacity of channel for given location
+        if self.ant_arr == 'upa':
+            channel = upa_channel_mmW.Channel(self.freq, tx_loc, self.rx_loc, self.sc_xyz, 'model', self.init_ch_model,
+                                              'nrx_y', self.Nrx_y, 'nrx_z', self.Nrx_z, 'ntx_y', self.Ntx_y, 'ntx_y',
+                                              self.Ntx_z, 'nFFT', self.nFFT, 'df', self.df)
+            channel.generate_paths(ch_randval, loc_ndx)
+            # self.npaths = self.channel.nlos_path + 1
+            h = channel.get_h()  # channel coefficient
+            #tx_bdir = self.BeamSet[tx_dir_ndx]  # self.channel.az_aod[0]#
+            #tx_beam = upa.var_steervec(self.Ntx_y, self.Ntx_z, tx_bdir)
+        for txdir_ndx in range(self.N_tx):
+            if self.ant_arr == 'ula':
+                tx_bdir = self.BeamSet[txdir_ndx]  # self.channel.az_aod[0]#
+                if (self.beam_param == 'beam-width'):
+                    tx_beam = ula.var_steervec(self.N_tx, tx_bdir, 0)
+                else:
+                    tx_beam = ula.steervec(self.N_tx, tx_bdir, 0)
 
+            if self.ant_arr == 'upa':
+                tx_bdir = self.BeamSet[txdir_ndx]  # self.channel.az_aod[0]#
+                tx_beam = upa.var_steervec(self.Ntx_y, self.Ntx_z, tx_bdir)
+
+            eff_ch = np.array(h[:, :, 0]).dot(tx_beam)
             for rbdir_ndx in range(self.N_rx):
-                wRF = ula.steervec(self.N_rx, self.BeamSet[rbdir_ndx], 0)
-                #for tbdir_ndx in range(self.N_tx):
-                #tx_beam = ula.steervec(self.N_tx, self.BeamSet[tbdir_ndx], 0)
-                #eff_ch = np.array(h[:, :, 0]).dot(tx_beam)
+                if (self.ant_arr == 'ula'):
+                    if (self.beam_param == 'beam-width'):
+                        wRF = ula.var_steervec(self.N_rx, self.BeamSet[rbdir_ndx], 0)
+                    else:
+                        wRF = ula.steervec(self.N_rx, self.BeamSet[rbdir_ndx], 0)
 
-                rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(eff_ch)) #+ (np.conj(wRF.T).dot(self.noise))[0]
+                if (self.ant_arr == 'upa'):
+                    wRF = upa.var_steervec(self.Nrx_x, self.Nrx_y, self.BeamSet[rbdir_ndx])
+                # for tbdir_ndx in range(self.N_tx):
+                # tx_beam = ula.steervec(self.N_tx, self.BeamSet[tbdir_ndx], 0)
+                # eff_ch = np.array(h[:, :, 0]).dot(tx_beam)
+
+                rssi_val = np.sqrt(self.N_rx * self.N_tx) * np.array(np.conj(wRF.T).dot(eff_ch))  # + (np.conj(wRF.T).dot(self.noise))[0]
                 Es = db2lin(self.P_tx)  # * (1e-3 / self.B)
                 SNR = Es * np.abs(rssi_val) ** 2 / (self.N0 * self.B)
                 rate = np.log2(1 + SNR)
@@ -412,18 +359,8 @@ class CombRF_Env_cab(gym.Env):
                     min_rate = rate
                     min_action_ndx = rbdir_ndx
                     min_rssi_val = rssi_val
-            action_ndices[max_action_ndx] += 1
-            action_ndices[min_action_ndx] -= 1
-            avg_max_rate += max_rate
-            avg_min_rate += min_rate
-        bestmax_action_ndx = np.argmax(action_ndices)
-        bestmin_action_ndx = np.argmin(action_ndices)
-        avg_max_rate /= len(ch_randvals)
-        avg_min_rate /= len(ch_randvals)
-        return avg_min_rate, avg_max_rate, bestmin_action_ndx, bestmax_action_ndx
+        return min_rate, max_rate, min_action_ndx, max_action_ndx, min_rssi_val, max_rssi_val
 
-    def get_rate(self):
-        return self.rate
 
     def compute_data_rate(self, rxbdir_ndx):
         wRF = ula.steervec(self.N_rx, self.BeamSet[rxbdir_ndx], 0)
@@ -434,9 +371,66 @@ class CombRF_Env_cab(gym.Env):
         rate = np.log2(1 + SNR)  # in Gbit/s (self.B / self.nFFT) *
         return rate
 
+    def get_rewards(self, action_ndx=None):
+        #transmission energy
+        #Es = db2lin(self.P_tx) #* (1e-3 / self.B)
+        #SNR = Es * np.abs(rssi_val)**2 / (self.N0*self.B)
+        #rate = np.log2(1 + SNR)  # in Gbit/s (self.B / self.nFFT) *
+        #rwd = 0.0
+        done = False
+
+        #if (self.rbdir_count == self.N_rx):#or ((rate == self.rate) and self.rbdir_count >1):  # ((rate >= self.rate) and (self.rbdir_count ==2)) or
+        #    done = True
+        #if done:
+        best_rate = max(self.ep_rates)
+        rwd_vals = [1.0 if (x == best_rate) else 0.0 for x in self.ep_rates]
+        #self.ep_rssi_db = [20*np.log10(np.abs(x)) for x in self.ep_rssi]
+        #best_rssi = max(self.ep_rssi_db)
+        #rwd_vals = [x/best_rate for x in self.ep_rates]
+
+        print("ep_rates: {} , reward values: {}".format(self.ep_rates, rwd_vals))
+        if action_ndx is not None:
+            return rwd_vals[action_ndx]#self.ep_rates[action_ndx]#
+        else:
+            return rwd_vals
+        #if  (rate > self.best_rate):  #(rate > self.rate) and and (self.rbdir_count < 2)
+        #    rwd = 1.0#float(np.round(rate))#1.0  # float(np.round(rate))
+        #    self.best_rate = rate
+        #if (rate < self.rate) or ((rate > self.rate) and (rate < self.best_rate)): #and (rate < self.best_rate)
+        #    rwd = -1.0#*float(np.round(rate))#-1.0
+        #rwd = rate
+
+        #if(rate > self.rate):
+        #    rwd = 1.0
+        #else:
+        #    rwd = 0.0
+
+        #self.rate = rate        # print(rwd)
+        #return rwd
+
     def _gameover(self):
-        if (self.rbdir_count == self.N_rx) or (self.best_rate == self.rate):#or (self.tx_bdir == self.rx_bdir) or (abs(self.tx_bdir-self.rx_bdir)==np.pi):
+        if (self.rbdir_count == self.N_rx):#or (self.tx_bdir == self.rx_bdir) or (abs(self.tx_bdir-self.rx_bdir)==np.pi):
            return True
         else:
             return False
 
+    def get_txloc_ndx(self, loc):
+        break_flag = False
+        loc_ndx = 0
+        for xloc in self.rx_xcov:
+            for yloc in self.rx_ycov:
+                for zloc in self.rx_zcov:
+                    if (xloc == 0) and (yloc == 0):
+                        tx_loc = np.array([[50, 50, zloc]])
+                    else:
+                        tx_loc = np.array([[xloc, yloc, zloc]])
+                    if (np.all(tx_loc == loc)):
+                        break_flag = True
+                        break
+                    if break_flag:
+                        break
+                    loc_ndx = loc_ndx + 1
+                if break_flag:
+                    break
+
+        return loc_ndx
