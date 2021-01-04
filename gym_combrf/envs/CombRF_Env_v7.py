@@ -52,9 +52,9 @@ Model Characteristics:
 
 class CombRF_Env_v7(gym.Env):
     def __init__(self):
-        self.Ntx_x = 16  # tx antennas along y-direction
+        self.Ntx_x = 8  # tx antennas along y-direction
         self.Ntx_y = 1  # tx antennas along z-direction
-        self.Nrx_x = 16  # rx antennas along y-direction
+        self.Nrx_x = 8  # rx antennas along y-direction
         self.Nrx_y = 1  # rx antennas along z-direction
 
         self.N_tx = self.Ntx_x * self.Ntx_y  # number of TX antennas
